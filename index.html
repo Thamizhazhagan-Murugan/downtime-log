@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Extrusion Downtime Log</title>
+<meta name="description" content="Shift clock and downtime log for the extrusion line.">
+<meta name="theme-color" content="#1a2530">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Downtime">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
+</head>
+<body>
+<header class="hmi">
+  <div class="hmi-in">
+    <div class="hmi-row">
+      <div class="ident">
+        <span class="ident-k">Extrusion line</span>
+        <h1 class="ident-t">Downtime Log</h1>
+      </div>
+      <div class="hmi-right">
+        <span class="hmi-shift" id="hdrShift"></span>
+        <span id="netChip" class="netchip" hidden></span>
+        <span id="lineState" class="state" role="status" aria-live="polite">Connecting…</span>
+        <button type="button" class="userbtn" id="userBtn" hidden></button>
+      </div>
+    </div>
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab" type="button" data-tab="shift" aria-selected="true">Shift</button>
+      <button class="tab" type="button" data-tab="analysis" aria-selected="false">Analysis</button>
+      <button class="tab" type="button" data-tab="history" aria-selected="false">History</button>
+      <button class="tab" type="button" data-tab="admin" aria-selected="false" hidden>Admin</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="notice" class="notice" hidden><span id="noticeText"></span><button type="button" class="btn btn-sm btn-quiet" id="noticeX">Dismiss</button></div>
+
+  <!-- CLOCK-IN GATE -->
+  <section id="gate" class="gate" hidden>
+    <div class="gate-card">
+      <p class="kicker" id="gateKicker"></p>
+      <h2 class="gate-t" id="gateTitle">Clock in</h2>
+      <p class="gate-s" id="gateSub"></p>
+      <div class="gate-body" id="gateBody"></div>
+    </div>
+  </section>
+
+  <div id="exBanner" class="exbanner" hidden>
+    <strong>Example data</strong>
+    <span id="exText"></span>
+    <button type="button" id="exHide" class="btn btn-sm">Hide examples</button>
+  </div>
+
+  <!-- SHIFT -->
+  <section class="panelset" data-panel="shift" hidden>
+    <div id="shiftLoading" class="empty"><p class="empty-t">Loading the shared log…</p><p class="empty-s">The line state, machine tiles and shift timeline appear here.</p></div>
+    <div id="shiftBody" class="panelset" hidden>
+      <div id="clockStrip" class="clockstrip" hidden><span>You are not clocked in. Clock in to log entries and get your shift report.</span><button type="button" class="btn btn-primary" id="clockInBtn">Clock in</button></div>
+      <section class="hero" id="hero" aria-live="polite">
+        <div class="hero-top"><span class="kicker" id="heroKicker"></span><span class="kicker" id="heroShift"></span></div>
+        <div class="hero-grid">
+          <div>
+            <div class="hero-state"><span class="hero-dot" aria-hidden="true"></span><span id="heroState"></span></div>
+            <p class="hero-cause" id="heroCause"></p>
+          </div>
+          <div class="hero-clock">
+            <span class="hero-timer" id="heroTimer">—</span>
+            <span class="hero-since" id="heroSince"></span>
+          </div>
+        </div>
+        <div class="hero-act" id="heroAct"></div>
+        <div class="hero-watch" id="heroWatch"></div>
+      </section>
+
+      <section class="blk" aria-labelledby="tilesTitle">
+        <div class="blk-h"><h3 class="blk-t" id="tilesTitle">Machines</h3><span class="panel-sub">Tap a machine to log what it is doing.</span></div>
+        <div class="tiles" id="tiles"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="shiftTitle">
+        <div class="panel-head">
+          <div><h3 id="shiftTitle">Shift</h3><p class="panel-sub" id="shiftSub"></p></div>
+          <button type="button" class="btn btn-sm" id="reportBtn">Shift report PDF</button>
+        </div>
+        <div class="kpis k4 inset" id="shiftKpis"></div>
+        <div class="tl" id="shiftTl"></div>
+        <div class="legend" id="shiftLegend"></div>
+        <div class="clist" id="shiftCauses"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="slogTitle">
+        <div class="panel-head">
+          <div><h3 id="slogTitle">Shift log</h3><p class="panel-sub">Every entry this shift, newest first. Select one of yours to correct it.</p></div>
+          <button type="button" class="btn btn-sm btn-quiet" data-goto="history">All history</button>
+        </div>
+        <div class="hlist" id="shiftLog"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ANALYSIS -->
+  <section class="panelset" data-panel="analysis" hidden>
+    <div class="toolbar"><div class="seg" id="aRange" role="group" aria-label="Period"></div></div>
+    <div id="anEmpty" class="empty" hidden></div>
+    <div id="anBody" class="panelset" hidden>
+      <div class="lede"><p class="kicker" id="anKicker"></p><h2 class="headline" id="anHead"></h2><p class="subline" id="anSub"></p></div>
+      <div class="kpis k6" id="anKpis"></div>
+      <section class="panel" aria-labelledby="parTitle">
+        <div class="panel-head"><div><h3 id="parTitle">Where the downtime goes</h3><p class="panel-sub">Every cause that stopped extrusion, biggest first. Rows above the dashed line make up 80% of the downtime.</p></div></div>
+        <div class="pareto" id="anPareto"></div>
+      </section>
+      <section class="panel" aria-labelledby="trTitle">
+        <div class="panel-head"><div><h3 id="trTitle">Downtime over time</h3><p class="panel-sub" id="trSub"></p></div></div>
+        <div class="legend" id="trLegend"></div>
+        <div class="tr" id="anTrend"></div>
+      </section>
+      <section class="panel" aria-labelledby="miTitle">
+        <div class="panel-head"><div><h3 id="miTitle">Issues and alarms</h3><p class="panel-sub">Every downtime state and alarm on every machine, including support-machine issues the line ran through. Line stopped is the part that cost extrusion time.</p></div></div>
+        <div class="tablewrap" id="anIssues"></div>
+      </section>
+      <div class="grid2">
+        <section class="panel" aria-labelledby="modeTitle">
+          <div class="panel-head"><div><h3 id="modeTitle">By machine mode</h3><p class="panel-sub">Mode of the machine holding the line at the time. Downtime in Manual or Maintenance usually means hands-on work.</p></div></div>
+          <div class="tablewrap" id="anModes"></div>
+        </section>
+        <section class="panel" aria-labelledby="byShiftTitle">
+          <div class="panel-head"><div><h3 id="byShiftTitle">By shift</h3><p class="panel-sub">Same period split by shift.</p></div></div>
+          <div class="tablewrap" id="anShifts"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="panelset" data-panel="history" hidden>
+    <div class="toolbar">
+      <div class="seg" id="hRange" role="group" aria-label="Period"></div>
+      <div class="tb-r">
+        <select id="hMachine" class="sel" aria-label="Machine"></select>
+        <button type="button" id="csvTimeline" class="btn" title="One row per period of running or downtime">Timeline CSV</button>
+        <button type="button" id="csvEntries" class="btn" title="One row per log entry">Entries CSV</button>
+      </div>
+    </div>
+    <p class="count" id="hCount"></p>
+    <textarea id="csvFallback" class="csvfb" hidden readonly aria-label="CSV text"></textarea>
+    <div id="hEmpty" class="empty" hidden></div>
+    <div id="hList" class="panel hlist"></div>
+  </section>
+
+  <!-- ADMIN -->
+  <section class="panelset adm" data-panel="admin" hidden>
+    <section class="panel" aria-labelledby="peopleTitle">
+      <div class="panel-head"><div><h3 id="peopleTitle">Users</h3><p class="panel-sub">Users log entries and see all the analysis. Admins also approve people and manage machines, alarms and shifts.</p></div></div>
+      <div id="admPeople"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="machTitle">
+      <div class="panel-head">
+        <div><h3 id="machTitle">Machines and alarms</h3><p class="panel-sub" id="machSub">In flow order. Alarms show up as a pick list when someone logs that state. Renaming does not change old entries.</p></div>
+      </div>
+      <div class="mlist" id="admMachines"></div>
+      <div><button type="button" class="btn" data-act="addm" id="addMachine">+ Add machine</button></div>
+    </section>
+
+    <section class="panel" aria-labelledby="shTitle2">
+      <div class="panel-head"><div><h3 id="shTitle2">Shifts</h3><p class="panel-sub">Start time of each shift. A shift ends when the next one starts.</p></div></div>
+      <div class="dstates" id="admShifts"></div>
+      <div><button type="button" class="btn" id="addShift">+ Add shift</button></div>
+    </section>
+
+    <div class="savebar" id="saveBar" hidden>
+      <span>Unsaved changes to the line setup</span>
+      <span class="form-actions"><button type="button" class="btn btn-quiet" id="discardBtn">Discard</button><button type="button" class="btn btn-primary" id="saveBtn">Save changes</button></span>
+      <span class="err" id="saveErr" hidden></span>
+    </div>
+
+    <section class="panel" aria-labelledby="sessTitle">
+      <div class="panel-head"><div><h3 id="sessTitle">Clock-ins</h3><p class="panel-sub">The last 50 clock-ins. Download anyone's shift report, or clock out someone who forgot.</p></div></div>
+      <div class="tablewrap" id="admSessions"></div>
+    </section>
+
+    <details class="howto">
+      <summary>How the clock works</summary>
+      <dl class="defs">
+        <div><dt>One state at a time</dt><dd>The line is always in one state. Each entry stops the running timer and starts the next one, so every minute of the shift is either extrusion or downtime.</dd></div>
+        <div><dt>Main machine (press)</dt><dd>Its running state is extrusion time. Every other state is downtime until someone logs the running state again.</dd></div>
+        <div><dt>Stops the line right away</dt><dd>Puller and stretcher. An issue stops the extrusion clock until the machine is back to Auto. Then the line returns to whatever the press is doing.</dd></div>
+        <div><dt>Line keeps running</dt><dd>Feeding line. Issues do not stop extrusion unless someone presses Stop the press. From then on the downtime goes to that machine until it is back to Auto.</dd></div>
+        <div><dt>Group</dt><dd>ZPE A and ZPE B. One down does not stop the line. When all machines in the group are down together for the delay, the press stops and the downtime goes to the group.</dd></div>
+        <div><dt>Availability</dt><dd>Extrusion time ÷ (extrusion time + downtime). Time before the first entry is shown as not logged and left out.</dd></div>
+        <div><dt>Sign-in and roles</dt><dd>People sign in with Google or email. New accounts wait for an admin to approve them. Only the main admin can make or remove admins. The database rules enforce the same, so the app cannot be used to get around them.</dd></div>
+      </dl>
+    </details>
+    <div class="form-actions"><button type="button" id="exToggle" class="btn btn-quiet">Show example data</button></div>
+  </section>
+</main>
+
+<nav class="bnav" aria-label="Sections">
+  <button class="bn" type="button" data-tab="shift" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 2h5"/></svg>Shift</button>
+  <button class="bn" type="button" data-tab="analysis" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M6 16v-4M11 16V6M16 16v-7"/></svg>Analysis</button>
+  <button class="bn" type="button" data-tab="history" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>History</button>
+  <button class="bn" type="button" data-tab="admin" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 15h6M9 8h6M17 16h6"/></svg>Admin</button>
+</nav>
+
+<!-- LOG SHEET -->
+<dialog id="sheet" class="sheet" aria-labelledby="shTitle">
+  <form id="shForm" novalidate>
+    <div class="sh-head">
+      <div>
+        <p class="kicker" id="shKicker">Log a change</p>
+        <h2 id="shTitle">Which machine?</h2>
+        <p class="sh-now" id="shNow"></p>
+      </div>
+      <button type="button" class="x" id="shClose" aria-label="Close">×</button>
+    </div>
+    <div class="sh-body">
+      <p id="shNote0" class="notice notice-inline" hidden></p>
+      <div id="shMachWrap" class="sh-sec"><div class="opts" id="shMachines"></div></div>
+      <div id="shStateWrap" class="sh-sec" hidden>
+        <div class="sh-row"><p class="lbl" id="shStateLbl">What is it doing now?</p><span><button type="button" class="linkbtn" id="shGroupLink" hidden>Both</button> <button type="button" class="linkbtn" id="shChange">Other machine</button></span></div>
+        <div class="opts" id="shStates"></div>
+      </div>
+      <div id="shAlarmWrap" class="sh-sec" hidden><p class="lbl">Which alarm?</p><div class="opts alarms-pick" id="shAlarms"></div></div>
+      <p id="shInfo" class="sh-info" hidden></p>
+      <div id="shStopWrap" class="sh-sec" hidden><p class="lbl">Press</p><div class="modes two" id="shStop"></div></div>
+      <div id="shModeWrap" class="sh-sec" hidden><p class="lbl">Machine mode</p><div class="modes" id="shModes"></div></div>
+      <div id="shDetail" class="sh-sec" hidden>
+        <label class="field" for="shText"><span id="shTextLbl">Notes <em>optional</em></span><input id="shText" type="text" list="shList" maxlength="120" autocomplete="off" placeholder="What you saw, what you already tried"></label>
+        <datalist id="shList"></datalist>
+      </div>
+      <div id="shWhenWrap" class="sh-sec" hidden>
+        <p class="lbl">When did it start?</p>
+        <div class="quick" id="shWhen"></div>
+        <input id="shAt" type="datetime-local" aria-label="Start time" hidden>
+      </div>
+      <p id="shErr" class="form-err" role="alert" hidden></p>
+    </div>
+    <div class="sh-foot"><button type="submit" class="btn btn-primary btn-lg btn-block" id="shSubmit" disabled>Log</button></div>
+  </form>
+</dialog>
+
+<!-- EDIT ENTRY -->
+<dialog id="edit" class="sheet" aria-labelledby="edTitle">
+  <form id="edForm" novalidate>
+    <div class="sh-head">
+      <div><p class="kicker" id="edKicker">Entry</p><h2 id="edTitle">Entry</h2></div>
+      <button type="button" class="x" id="edClose" aria-label="Close">×</button>
+    </div>
+    <div class="sh-body">
+      <p id="edNote" class="notice notice-inline" hidden></p>
+      <div class="row2">
+        <label class="field" for="ed-state"><span>State</span><select id="ed-state"></select></label>
+        <label class="field" for="ed-mode"><span>Machine mode</span><select id="ed-mode"></select></label>
+      </div>
+      <label class="field" for="ed-alarm" id="edAlarmWrap"><span>Alarm</span><select id="ed-alarm"></select></label>
+      <label class="field" for="ed-stop" id="edStopWrap" hidden><span>Press</span><select id="ed-stop"><option value="">Kept extruding</option><option value="1">Stopped for this</option></select></label>
+      <label class="field" for="ed-at"><span>Started at</span><input id="ed-at" type="datetime-local"></label>
+      <label class="field" for="ed-note"><span>Notes</span><input id="ed-note" type="text" maxlength="120"></label>
+      <p class="meta" id="edMeta"></p>
+      <p id="edErr" class="form-err" role="alert" hidden></p>
+    </div>
+    <div class="sh-foot dlg-actions" id="edActions">
+      <button type="button" id="edDelete" class="btn btn-danger">Delete</button>
+      <span class="sp"></span>
+      <button type="submit" id="edSave" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ACCOUNT -->
+<dialog id="acct" class="sheet" aria-labelledby="acTitle">
+  <div class="sheet-in">
+    <div class="sh-head">
+      <div class="who"><span class="avatar" id="acAvatar"></span><div><h2 id="acTitle">Name</h2><p class="sh-now" id="acRole"></p></div></div>
+      <button type="button" class="x" id="acClose" aria-label="Close">×</button>
+    </div>
+    <div class="sh-body">
+      <div class="acct-stats" id="acStats"></div>
+      <p class="sh-info" id="acInfo"></p>
+    </div>
+    <div class="sh-foot dlg-actions" id="acActions"></div>
+  </div>
+</dialog>
+
+<div id="tip" class="tip" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
