@@ -1,15 +1,14 @@
-/* App settings. The Firebase web config is safe to publish: access to data is controlled by
-   Firebase Authentication and the rules in firestore.rules, not by hiding these values. */
+// App settings. These Firebase values are public identifiers, not secrets:
+// the data is protected by the Firestore rules in firestore.rules.
 window.APP_CONFIG = {
-  // Only this account can make or remove admins. It must sign in with a verified email (Google sign-in is verified).
+  // The only account that can make or remove admins. Keep it the same as superEmail() in firestore.rules.
   superAdminEmail: 'ttthamizh66@gmail.com',
-  // Paste the firebaseConfig object from Firebase console > Project settings > Your apps.
   firebase: {
-    apiKey: 'PASTE_API_KEY',
-    authDomain: 'PASTE_PROJECT_ID.firebaseapp.com',
-    projectId: 'PASTE_PROJECT_ID',
-    storageBucket: 'PASTE_PROJECT_ID.appspot.com',
-    messagingSenderId: 'PASTE_SENDER_ID',
-    appId: 'PASTE_APP_ID'
+    apiKey: 'AIzaSyC0P6MiEXp9feOfxutSJPIsZwMbc50FnlA',
+    authDomain: 'downtime-log-afeb3.firebaseapp.com',
+    projectId: 'downtime-log-afeb3',
+    storageBucket: 'downtime-log-afeb3.firebasestorage.app',
+    messagingSenderId: '532717678683',
+    appId: '1:532717678683:web:210ba59bbbdad2367b4f7e'
   }
 };
