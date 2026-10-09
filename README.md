@@ -18,6 +18,7 @@ It runs in any browser and installs on phones and tablets as an app (PWA). Every
 - **History:** every entry. Owners and admins can correct entries. Exports to CSV for Excel.
 - **Maintenance log (maintenance team and admins):** any job on any equipment or place, not only the line: final saw, crane, forklift, preventive work. Each job records the equipment, technicians, type (breakdown, preventive, improvement, other), status (in progress, waiting for parts, fixed), problem or task, diagnosis, solution, notes, parts used (part number, description, quantity) and start and finish times. Start a job now and mark it fixed later, or enter it afterwards. Open jobs show at the top with buttons for Fixed and Waiting for parts / Parts arrived. A job can list more than one technician. **Download PDF** prints one work order per page (Letter), in the same layout as the plant's paper work order: company heading, an empty Work Order box to write the number in, the type band, the component and work order fields, Comments (the problem), Diagnosis, Solution, Notes (the job notes, then the parts used), and Work completed with type, technicians and status above the signature, date, duration and breakdown time line. Fields the app does not track are left blank. Each job also has its own PDF button. The company name is set in **Admin > Maintenance**.
 - **Shift report PDF:** the operator, date, clock-in and clock-out times, totals, a timeline, downtime by cause and a time-ordered log. Available any time during a shift and when clocking out.
+- **English and French:** every screen, message, CSV export and shift report is available in both languages, for all users and admins. Press **FR** or **EN** at the top of the screen to switch; the choice is kept on that device, and a new device starts in the language of its browser. The default machine, state, alarm and equipment names are shown in French too (Presse, Extracteur, Changement de matrice…), but they stay stored in English, so entries logged in either language add up together in the analysis. Names an admin types in **Admin** are shown as typed. The maintenance work order PDF keeps the plant's English form; the text people type in a job is printed as typed.
 
 ## Sign-in and roles
 
@@ -101,6 +102,7 @@ The line timeline is not stored. It is rebuilt from the entries, so correcting a
 index.html               app shell
 css/app.css              styles (light and dark)
 js/config.js             Firebase settings and main admin email
+js/i18n.js               French text (screen, messages, PDFs) and default names
 js/app.js                the app
 vendor/jspdf.umd.min.js  PDF library (jsPDF 2.5.1, MIT)
 sw.js, manifest.webmanifest, icons/   installable app and offline start-up
@@ -111,3 +113,7 @@ firestore.indexes.json   database indexes
 ## Updating the database rules
 
 When `firestore.rules` changes in this repository, paste the whole file into **Firebase console > Firestore Database > Rules** again and press **Publish**. Until then the database keeps the old rules, and any feature that needs the new ones is refused.
+
+## Adding or changing a French translation
+
+All French text is in `js/i18n.js`. Each line pairs the English text exactly as it appears in the app with its French version. `{0}`, `{1}` are filled in by the app (a name, a time, a count), and `{0^}` does the same with a capital first letter. Machine, state, alarm and equipment names go in the `DATA` list. After editing, raise the version number (`?v=` in `index.html` and `VERSION` in `sw.js`) so phones pick up the change.

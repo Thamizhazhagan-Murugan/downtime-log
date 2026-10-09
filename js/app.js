@@ -25,27 +25,55 @@ const uniq = a => [...new Set(a)];
 function uniqBy(a, f) { const seen = new Set(); return a.filter(x => { const k = f(x); if (seen.has(k)) return false; seen.add(k); return true; }); }
 const clone = o => JSON.parse(JSON.stringify(o));
 const MIN = 60000, HOUR = 3600000, DAY = 86400000;
+
+/* ================= language: English or French =================
+   The dictionary lives in js/i18n.js. Text written in code goes through tx() (templates with {0}, {1}...),
+   and everything else on screen is translated as it appears (see the observer at the bottom).
+   Names that come from the setup (machines, states, alarms) are stored in English and only shown in French. */
+const I18 = window.I18N || { lang: 'en', FR: {}, DATA: {}, PL: {} };
+const LANG = I18.lang === 'fr' ? 'fr' : 'en', LOC = LANG === 'fr' ? 'fr-CA' : 'en-CA';
+const FRX = LANG === 'fr' ? I18.FR : {}, DATA_FR = LANG === 'fr' ? I18.DATA : {};
+const dn = x => (typeof x === 'string' && DATA_FR[x]) || x;
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const COLON = LANG === 'fr' ? ' : ' : ': ';
+/* same English word, different French one: look up 'key' first (e.g. 'Time (clock)' for a time of day) */
+const txAt = (key, en) => FRX[key] || tx(en);
+function tx(en, ...a) { const s = FRX[en] || DATA_FR[en] || en; return s.replace(/\{(\d)(\^?)\}/g, (_, i, up) => { const v = a[+i]; const t = v == null ? '' : dn(String(v)); return up ? cap(t) : t; }); }
+/* the same, but the pieces may be elements: returns an array for h() or rc() */
+function txh(en, ...a) { const s = FRX[en] || DATA_FR[en] || en, out = []; let last = 0; s.replace(/\{(\d)(\^?)\}/g, (m, i, up, at) => { if (at > last) out.push(s.slice(last, at)); const v = a[+i]; out.push(v instanceof Node ? v : (t => up ? cap(t) : t)(dn(String(v == null ? '' : v)))); last = at + m.length; return m; }); if (last < s.length) out.push(s.slice(last)); return out; }
+/* translate a finished piece of text (screen text, tooltips, PDF): whole lines only */
+function tr(v) {
+  if (LANG !== 'fr' || v == null) return v;
+  const s = String(v);
+  if (s.indexOf('\n') >= 0) return s.split('\n').map(tr).join('\n');
+  const core = s.trim(); if (!core) return s;
+  const out = FRX[core] || DATA_FR[core];
+  return out ? s.replace(core, out) : s;
+}
+const num1 = v => LANG === 'fr' ? v.toFixed(1).replace('.', ',') : v.toFixed(1);
+const numS = v => LANG === 'fr' ? String(v).replace('.', ',') : String(v);
 const pad = n => String(n).padStart(2, '0');
 function toLocalInput(ms) { const d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 function fromLocalInput(v) { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : null; }
 function fmtDur(ms) { const m = Math.max(0, Math.round(ms / MIN)); if (m < 60) return m + ' min'; const hh = Math.floor(m / 60), r = m % 60; return r ? hh + ' h ' + r + ' min' : hh + ' h'; }
-function fmtH(ms) { const v = ms / HOUR; return v >= 100 ? String(Math.round(v)) : v.toFixed(1); }
+function fmtH(ms) { const v = ms / HOUR; return v >= 100 ? String(Math.round(v)) : num1(v); }
 function clock(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 3600) + ':' + pad(Math.floor(s % 3600 / 60)) + ':' + pad(s % 60); }
 function mmss(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ':' + pad(s % 60); }
 const hm = ms => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 function fmtDay(ms) {
   const d = new Date(ms), now = new Date();
-  if (sameDay(d, now)) return 'Today';
-  if (sameDay(d, new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return 'Yesterday';
-  return d.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
+  if (sameDay(d, now)) return tx('Today');
+  if (sameDay(d, new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return tx('Yesterday');
+  return d.toLocaleDateString(LOC, { weekday: 'short', month: 'short', day: 'numeric' });
 }
-const fmtWhen = ms => { const d = fmtDay(ms); return (d === 'Today' ? '' : d + ' ') + hm(ms); };
-const fmtDate = ms => new Date(ms).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
-const longDate = ms => new Date(ms).toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+const fmtWhen = ms => { const d = fmtDay(ms); return (d === tx('Today') ? '' : d + ' ') + hm(ms); };
+const fmtDate = ms => new Date(ms).toLocaleDateString(LOC, { month: 'short', day: 'numeric' });
+const longDate = ms => new Date(ms).toLocaleDateString(LOC, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 const ymd = ms => { const d = new Date(ms); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
-const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
-const andList = a => a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+const EN_PL = { entry: 'entries' };
+const plural = (n, w) => { const f = LANG === 'fr' && I18.PL[w]; return n + ' ' + (f ? f[(n === 1 || n === 0) ? 0 : 1] : (n === 1 ? w : (EN_PL[w] || w + 's'))); };
+const andList = a => { a = a.map(dn); return a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + (LANG === 'fr' ? ' et ' : ' and ') + a[a.length - 1]; };
 const initials = n => (String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')) || '?';
 const slug = s => String(s || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'report';
 function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -123,7 +151,7 @@ function groupsCfg() {
 }
 const groupOf = name => groupsCfg().find(g => g.members.includes(name)) || null;
 const groupState = g => g.members.length === 2 ? 'Both down' : 'All down';
-const groupLabel = g => g.name + (g.members.length === 2 ? ' both' : ' all');
+const groupLabel = g => g.members.length === 2 ? tx('{0} both', g.name) : tx('{0} all', g.name);
 function groupStates(g) {
   const first = cfgMachine(g.members[0]); if (!first) return [];
   return first.states.filter(s => g.members.every(mm => { const mc = cfgMachine(mm); return mc && mc.states.some(x => x.name === s.name && x.run === s.run); }))
@@ -200,10 +228,10 @@ const useExample = () => S.exampleForced || (!S.exampleDismissed && (S.hasAny ==
 const canLog = () => S.conn === 'live' && isActive() && !!S.session;
 function rangeBounds(id) {
   const now = Date.now(), cur = shiftBounds(now);
-  if (id === 'shift') return { from: cur.start, to: now, phrase: 'this shift (' + cur.name + ')' };
-  if (id === 'last') { const p = shiftBounds(cur.start - 1); return { from: p.start, to: p.end, phrase: 'the last shift (' + p.name + ', ' + fmtDay(p.start).toLowerCase() + ')' }; }
+  if (id === 'shift') return { from: cur.start, to: now, phrase: tx('this shift ({0})', cur.name) };
+  if (id === 'last') { const p = shiftBounds(cur.start - 1); return { from: p.start, to: p.end, phrase: tx('the last shift ({0}, {1})', p.name, fmtDay(p.start).toLowerCase()) }; }
   const r = RANGES.find(x => x.id === id) || RANGES[3];
-  return { from: now - r.days * DAY, to: now, phrase: r.days === 1 ? 'the last 24 hours' : 'the last ' + r.days + ' days' };
+  return { from: now - r.days * DAY, to: now, phrase: r.days === 1 ? tx('the last 24 hours') : tx('the last {0} days', r.days) };
 }
 
 /* ================= events & the line state engine ================= */
@@ -500,7 +528,8 @@ function normSession(id, d) {
   if (!d || typeof d.clockIn !== 'number') return null;
   return { id, uid: typeof d.uid === 'string' ? d.uid : '', name: typeof d.name === 'string' ? d.name.slice(0, 60) : 'Someone', clockIn: d.clockIn, clockOut: typeof d.clockOut === 'number' ? d.clockOut : null, open: d.open === true };
 }
-function fbMsg(x) {
+const fbMsg = x => tx(fbMsgEn(x));
+function fbMsgEn(x) {
   const c = x && x.code;
   if (c === 'permission-denied') return isSuper() ? 'The database refused this. If the app was just updated, publish the latest database rules (Firebase > Firestore Database > Rules).' : "You don't have access to do that. Ask an admin.";
   if (c === 'unavailable') return "Can't reach the database right now. It saves on this device and syncs when the connection is back.";
@@ -509,7 +538,8 @@ function fbMsg(x) {
   return "Couldn't save. Check the connection and try again.";
 }
 const writeMsg = fbMsg;
-function authMsg(x) {
+const authMsg = x => tx(authMsgEn(x));
+function authMsgEn(x) {
   const c = x && x.code;
   if (c === 'auth/invalid-email') return 'That email address does not look right.';
   if (c === 'auth/user-not-found' || c === 'auth/wrong-password' || c === 'auth/invalid-credential' || c === 'auth/invalid-login-credentials') return 'Wrong email or password.';
@@ -540,7 +570,7 @@ function renderGate() {
   $('#gate').hidden = mode === 'none';
   if (mode === 'none') return;
   const sb = shiftBounds(Date.now());
-  $('#gateKicker').textContent = sb.name + ' shift · ' + hm(sb.start) + '–' + hm(sb.end);
+  $('#gateKicker').textContent = tx('{0} shift · {1}–{2}', sb.name, hm(sb.start), hm(sb.end));
   const title = $('#gateTitle'), sub = $('#gateSub'), body = $('#gateBody');
   const email = S.fbUser ? S.fbUser.email : '';
   const msgs = () => [G.err ? h('p', { class: 'form-err', role: 'alert' }, G.err) : null, G.info ? h('p', { class: 'sh-info' }, G.info) : null];
@@ -563,12 +593,12 @@ function renderGate() {
     return;
   }
   if (mode === 'verify') {
-    title.textContent = 'Verify your email'; sub.textContent = 'We sent a link to ' + email + '. Admin rights switch on after you open it.';
+    title.textContent = 'Verify your email'; sub.textContent = tx('We sent a link to {0}. Admin rights switch on after you open it.', email);
     rc(body, msgs(), gateBtn('I opened the link', 'btn-primary', recheckVerified), gateBtn('Send the link again', '', resendVerify), gateBtn('Sign out', 'btn-quiet', signOut));
     return;
   }
   if (mode === 'pending') {
-    title.textContent = 'Waiting for approval'; sub.textContent = email + ' is signed in. An admin has to approve you before you can see the log. This page opens by itself once you are approved.';
+    title.textContent = 'Waiting for approval'; sub.textContent = tx('{0} is signed in. An admin has to approve you before you can see the log. This page opens by itself once you are approved.', email);
     rc(body, msgs(), gateBtn('Sign out', '', signOut));
     return;
   }
@@ -579,7 +609,7 @@ function renderGate() {
   }
   if (mode === 'bye') {
     const s = G.clockedOut;
-    title.textContent = 'Clocked out'; sub.textContent = 'Thanks, ' + (s.name || myName()) + '. Your shift is saved.';
+    title.textContent = 'Clocked out'; sub.textContent = tx('Thanks, {0}. Your shift is saved.', s.name || myName());
     rc(body,
       h('div', { class: 'acct-stats' },
         h('div', null, h('span', null, 'Clocked in'), h('b', null, hm(s.clockIn))),
@@ -632,7 +662,7 @@ async function resetPass() {
   G.err = ''; G.info = '';
   const email = G.email.trim();
   if (!email) { G.err = 'Type your email above first, then press Forgot password.'; renderGate(); return; }
-  try { await S.auth.sendPasswordResetEmail(email); G.info = 'If ' + email + ' has an account, a reset link is on its way. Check your inbox.'; }
+  try { await S.auth.sendPasswordResetEmail(email); G.info = tx('If {0} has an account, a reset link is on its way. Check your inbox.', email); }
   catch (x) { G.err = authMsg(x); }
   renderGate();
 }
@@ -666,7 +696,7 @@ async function ensureProfile(ref) {
   const u = S.fbUser, sup = isSuper();
   const doc = { name: (G.pendingName || u.displayName || String(u.email || '').split('@')[0] || 'New user').slice(0, 60), email: String(u.email || '').toLowerCase(), role: sup ? 'admin' : 'user', team: 'operator', status: sup ? 'active' : 'pending', createdAt: Date.now(), photo: u.photoURL || '' };
   G.pendingName = '';
-  try { await ref.set(doc); } catch (x) { G.err = "Couldn't create your profile. " + fbMsg(x); S.meLoaded = true; renderAll(); }
+  try { await ref.set(doc); } catch (x) { G.err = tx("Couldn't create your profile. {0}", fbMsg(x)); S.meLoaded = true; renderAll(); }
   S.creatingMe = false;
 }
 function startData() {
@@ -734,7 +764,7 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 function renderAcct() {
   const nm = myName(), now = Date.now();
   $('#acAvatar').textContent = initials(nm); $('#acTitle').textContent = nm || 'Account';
-  $('#acRole').textContent = (S.fbUser ? S.fbUser.email : '') + ' · ' + (isSuper() ? 'Main admin' : isAdmin() ? 'Admin' : 'User');
+  $('#acRole').textContent = (S.fbUser ? S.fbUser.email : '') + ' · ' + tx(isSuper() ? 'Main admin' : isAdmin() ? 'Admin' : 'User') + (isMaint() ? ' · ' + tx('Maintenance') : '');
   const stats = [];
   if (S.session) stats.push(h('div', null, h('span', null, 'Clocked in'), h('b', null, hm(S.session.clockIn))), h('div', null, h('span', null, 'On shift for'), h('b', null, fmtDur(now - S.session.clockIn))));
   else stats.push(h('div', null, h('span', null, 'Shift'), h('b', null, 'Not clocked in')), h('div', null, h('span', null, 'Connection'), h('b', null, S.online ? 'Online' : 'Offline')));
@@ -799,24 +829,24 @@ function applyTab() {
 function renderHeader(L) {
   const st = $('#lineState'); st.className = 'state';
   const sb = shiftBounds(Date.now());
-  rc($('#hdrShift'), h('span', { class: 'hc' }, ico('clock'), h('span', null, h('small', null, 'Shift'), h('b', null, sb.name + ' · ' + hm(sb.start) + '–' + hm(sb.end)))),
-    h('span', { class: 'hc' }, ico('cal'), h('span', null, h('small', null, 'Date'), h('b', null, new Date(sb.start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })))));
+  rc($('#hdrShift'), h('span', { class: 'hc' }, ico('clock'), h('span', null, h('small', null, 'Shift'), h('b', null, dn(sb.name) + ' · ' + hm(sb.start) + '–' + hm(sb.end)))),
+    h('span', { class: 'hc' }, ico('cal'), h('span', null, h('small', null, 'Date'), h('b', null, new Date(sb.start).toLocaleDateString(LOC, { month: 'short', day: 'numeric', year: 'numeric' })))));
   const ub = $('#userBtn');
   ub.hidden = !S.fbUser || gateMode() !== 'none';
   if (!ub.hidden) {
     const nm = myName();
-    rc(ub, h('span', { class: 'avatar' }, initials(nm)), h('span', { class: 'u-name' }, nm), h('span', { class: 'u-role' }, S.session ? 'On shift' : (isAdmin() ? 'Admin' : 'User')));
-    ub.setAttribute('aria-label', nm + '. Clock in or out, shift report, sign out.');
+    rc(ub, h('span', { class: 'avatar', translate: 'no' }, initials(nm)), h('span', { class: 'u-name', translate: 'no' }, nm), h('span', { class: 'u-role' }, S.session ? 'On shift' : (isAdmin() ? 'Admin' : 'User')));
+    ub.setAttribute('aria-label', tx('{0}. Clock in or out, shift report, sign out.', nm));
   }
   const net = $('#netChip');
   const off = !S.online, waiting = S.pending || 0;
   net.hidden = S.conn !== 'live' || (!off && !waiting);
-  if (!net.hidden) { net.className = 'netchip' + (off ? ' off' : ''); net.textContent = off ? 'Offline' + (waiting ? ' · ' + waiting + ' to sync' : ' · saving on this device') : 'Syncing ' + waiting; }
+  if (!net.hidden) { net.className = 'netchip' + (off ? ' off' : ''); net.textContent = off ? (waiting ? tx('Offline · {0} to sync', waiting) : tx('Offline · saving on this device')) : tx('Syncing {0}', waiting); }
   if (!L || !L.ready) { st.textContent = S.conn === 'offline' ? 'Demo' : (S.authReady && !S.fbUser) ? 'Signed out' : 'Connecting…'; return; }
   const line = L.R.line;
   if (useExample()) { st.textContent = 'Example data'; return; }
   if (line.run === true) st.replaceChildren(h('span', { class: 'dot', 'aria-hidden': 'true' }), 'Running');
-  else if (line.run === false) { st.classList.add('st-alarm'); st.replaceChildren(h('span', { class: 'tri', 'aria-hidden': 'true' }, '▲'), 'Down · ' + line.machine); }
+  else if (line.run === false) { st.classList.add('st-alarm'); st.replaceChildren(h('span', { class: 'tri', 'aria-hidden': 'true' }, '▲'), tx('Down · {0}', line.machine)); }
   else st.textContent = 'Clock not started';
 }
 function renderBanner() {
@@ -836,8 +866,8 @@ function toast(msg, action) {
   t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, action ? 9000 : 3200);
 }
 function fillNames() {}
-function nameOf(uid) { const u = uid ? userById(uid) : null; return u ? u.name : (uid ? 'Someone' : '—'); }
-function whoEl(e) { if (e.example) return e.personName || 'Example'; return e.personName || nameOf(e.uid); }
+function nameOf(uid) { const u = uid ? userById(uid) : null; return u ? u.name : (uid ? tx('Someone') : '—'); }
+function whoEl(e) { if (e.example) return e.personName || tx('Example'); return e.personName || nameOf(e.uid); }
 const whoText = e => e.personName || (e.uid ? nameOf(e.uid) : '');
 
 /* ================= SHIFT view ================= */
@@ -868,17 +898,18 @@ function renderShift(L) {
 }
 const lockOut = () => !canLog() || useExample();
 function actBtn(label, cls, fn) { return h('button', { type: 'button', class: cls, disabled: lockOut(), onclick: e => fn(e.currentTarget) }, label); }
-function backBtn(m, cls) { const t = runStateOf(m); return actBtn(m + ' back to ' + t, cls, b => quickLog(m, t, 'Auto', b)); }
+function backBtn(m, cls) { const t = runStateOf(m); return actBtn(tx('{0} back to {1}', m, t), cls, b => quickLog(m, t, 'Auto', b)); }
 function renderHero(L) {
   const line = L.R.line, now = L.now, P = primary();
   const kind = line.run === true ? 'run' : line.run === false ? 'down' : 'unk';
   const hero = $('#hero'), st = L.st, shift = L.shift;
   hero.className = 'card lcard is-' + kind;
-  $('#lineTag').textContent = shift.name + ' shift · ' + hm(shift.start) + '–' + hm(shift.end);
-  const stateTxt = kind === 'unk' ? 'Not logged yet' : line.group ? line.group.name + ' ' + line.state.toLowerCase() : (kind === 'down' && line.machine !== P) ? line.machine + ' ' + line.state.toLowerCase() : line.state;
-  const alarmTxt = line.group ? andList(line.group.members) + ' down together' : [line.ev && line.ev.alarm === OTHER ? line.ev.note : line.ev && line.ev.alarm, line.ev && line.ev.stop ? 'press stopped' : ''].filter(Boolean).join(' · ');
-  setPill($('#linePill'), kind === 'run' ? 'run' : kind === 'down' ? 'down' : 'unk', kind === 'run' ? 'Running' : kind === 'down' ? 'Down · ' + (line.group ? line.group.name : line.machine) : 'Not started');
-  gaugeEl.tip = 'Availability ' + (st.avail == null ? '–' : Math.round(st.avail * 100) + '%') + '\nRunning: ' + fmtDur(st.run) + '\nDowntime: ' + fmtDur(st.down) + (st.unk >= MIN ? '\nNot logged: ' + fmtDur(st.unk) : '') + '\nRunning ÷ (running + downtime)';
+  $('#lineTag').textContent = tx('{0} shift · {1}–{2}', shift.name, hm(shift.start), hm(shift.end));
+  const both = (a, b) => LANG === 'fr' ? dn(b) + ' – ' + dn(a) : a + ' ' + b.toLowerCase();
+  const stateTxt = kind === 'unk' ? tx('Not logged yet') : line.group ? both(line.group.name, line.state) : (kind === 'down' && line.machine !== P) ? both(line.machine, line.state) : dn(line.state);
+  const alarmTxt = line.group ? tx('{0} down together', andList(line.group.members)) : [line.ev && line.ev.alarm === OTHER ? line.ev.note : dn(line.ev && line.ev.alarm), line.ev && line.ev.stop ? tx('press stopped') : ''].filter(Boolean).join(' · ');
+  setPill($('#linePill'), kind === 'run' ? 'run' : kind === 'down' ? 'down' : 'unk', kind === 'run' ? tx('Running') : kind === 'down' ? tx('Down · {0}', line.group ? line.group.name : line.machine) : tx('Not started'));
+  gaugeEl.tip = tx('Availability {0}', st.avail == null ? '–' : Math.round(st.avail * 100) + '%') + '\n' + tx('Running: {0}', fmtDur(st.run)) + '\n' + tx('Downtime: {0}', fmtDur(st.down)) + (st.unk >= MIN ? '\n' + tx('Not logged: {0}', fmtDur(st.unk)) : '') + '\n' + tx('Running ÷ (running + downtime)');
   rc($('#lineGauge'), h('p', { class: 'col-t' }, 'Productivity'), gaugeEl(st.avail, 'Availability'));
   rc($('#lineInfo'),
     irow('state', 'Line state', stateTxt),
@@ -886,21 +917,21 @@ function renderHero(L) {
     irow('mode', 'Mode', (line.mode || (kind === 'unk' ? '—' : 'Not set'))),
     irow('user', 'Last entry by', line.ev && !line.group ? whoText(line.ev) || '—' : '—'));
   const r = hmParts(st.run), d = hmParts(st.down), top = st.causes[0];
-  const topTip = st.causes.slice(0, 5).map(c => '\n' + fmtDur(c.ms) + '  ' + c.state + ' · ' + c.machine).join('');
+  const topTip = st.causes.slice(0, 5).map(c => '\n' + fmtDur(c.ms) + '  ' + dn(c.state) + ' · ' + dn(c.machine)).join('');
   const tipT = (el, t) => { el.setAttribute('data-tip', t); el.tabIndex = 0; return el; };
-  const causeT = dtile('cause', 'Biggest cause', top ? top.state + ' · ' + top.machine : '—');
-  if (top) { causeT.classList.add('go'); causeT.setAttribute('role', 'button'); causeT.setAttribute('aria-label', 'Biggest cause: ' + top.state + ' on the ' + top.machine + '. Open it in Analysis.'); causeT.onclick = () => { S.arange = 'shift'; S.afocus = top.key; S.abucket = null; tipHide(); setTab('analysis'); }; causeT.onkeydown = keyPress; }
+  const causeT = dtile('cause', 'Biggest cause', top ? dn(top.state) + ' · ' + dn(top.machine) : '—');
+  if (top) { causeT.classList.add('go'); causeT.setAttribute('role', 'button'); causeT.setAttribute('aria-label', tx('Biggest cause: {0} on the {1}. Open it in Analysis.', top.state, top.machine)); causeT.onclick = () => { S.arange = 'shift'; S.afocus = top.key; S.abucket = null; tipHide(); setTab('analysis'); }; causeT.onkeydown = keyPress; }
   rc($('#lineData'),
-    tipT(dtile('run', 'Running', r[0] + ' ' + r[1]), 'Running ' + fmtDur(st.run) + '\nExtrusion time this shift'),
-    tipT(dtile('down', 'Downtime', d[0] + ' ' + d[1]), 'Downtime ' + fmtDur(st.down) + (topTip || '\nNo downtime yet')),
-    tipT(dtile('stops', 'Stops', String(st.stops)), plural(st.stops, 'stop') + ' this shift' + st.causes.slice(0, 5).map(c => '\n' + c.n + '×  ' + c.state + ' · ' + c.machine).join('')),
-    top ? tipT(causeT, top.state + ' · ' + top.machine + '\n' + fmtDur(top.ms) + ', ' + plural(top.n, 'stop') + '\nTap to open it in Analysis') : causeT);
+    tipT(dtile('run', 'Running', r[0] + ' ' + r[1]), tx('Running {0}', fmtDur(st.run)) + '\n' + tx('Extrusion time this shift')),
+    tipT(dtile('down', 'Downtime', d[0] + ' ' + d[1]), tx('Downtime {0}', fmtDur(st.down)) + (topTip || '\n' + tx('No downtime yet'))),
+    tipT(dtile('stops', 'Stops', String(st.stops)), tx('{0} this shift', plural(st.stops, 'stop')) + st.causes.slice(0, 5).map(c => '\n' + c.n + '×  ' + dn(c.state) + ' · ' + dn(c.machine)).join('')),
+    top ? tipT(causeT, dn(top.state) + ' · ' + dn(top.machine) + '\n' + fmtDur(top.ms) + ', ' + plural(top.n, 'stop') + '\n' + tx('Tap to open it in Analysis')) : causeT);
   renderTimeline($('#shiftTl'), L.RS.segs, shift.start, shift.end, now, { key: 'line' });
   const btns = [];
   if (useExample()) btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(P) }, 'Start the real clock'));
   else if (kind === 'down') {
     if (line.group) { btns.push(bothBackBtn(line.group, 'btn btn-go btn-lg')); line.group.members.forEach(m => btns.push(backBtn(m, 'btn btn-lg'))); }
-    else if (line.machine === P) btns.push(actBtn('Back to ' + runStateOf(P), 'btn btn-go btn-lg', b => quickLog(P, runStateOf(P), 'Auto', b)));
+    else if (line.machine === P) btns.push(actBtn(tx('Back to {0}', runStateOf(P)), 'btn btn-go btn-lg', b => quickLog(P, runStateOf(P), 'Auto', b)));
     else {
       btns.push(backBtn(line.machine, 'btn btn-go btn-lg'));
       if (ruleOf(line.machine) === 'optional') btns.push(actBtn('Restart the press, issue still open', 'btn btn-lg', b => setPressStop(line.machine, false, b)));
@@ -918,12 +949,12 @@ function renderWatch(L) {
     h('div', { class: 'w-t' }, h('b', null, o.title), h('span', null, o.sub)),
     o.until ? h('span', { class: 'w-clock', 'data-until': String(o.until), title: 'Time until the press stops' }, mmss(o.until - now)) : h('span'),
     h('div', { class: 'w-act' }, o.actions));
-  const what = s => s.state + (evText(s) ? ' · ' + evText(s) : '');
+  const what = s => dn(s.state) + (evText(s) ? ' · ' + dn(evText(s)) : '');
   for (const m of machines()) {
     if (m.main) continue;
     const s = st[m.name]; if (!s || s.run) continue;
     if (m.rule === 'optional' && !s.stop) {
-      items.push(row({ title: m.name + ': ' + what(s), sub: 'Line still running', since: s.downSince,
+      items.push(row({ title: dn(m.name) + ': ' + what(s), sub: 'Line still running', since: s.downSince,
         actions: [actBtn('Stop the press', 'btn btn-sm btn-stop', b => setPressStop(m.name, true, b)), backBtn(m.name, 'btn btn-sm btn-go')] }));
     } else if (m.rule === 'group') {
       const g = groupOf(m.name); if (!g || done.has(g.name)) continue;
@@ -932,11 +963,11 @@ function renderWatch(L) {
       if (allDown) {
         done.add(g.name);
         const trig = Math.max(...ss.map(x => x.downSince)) + g.delay * MIN;
-        items.push(row({ urgent: true, title: andList(g.members) + ' are ' + (g.members.length === 2 ? 'both' : 'all') + ' down', sub: 'Press stops at ' + hm(trig), until: trig,
+        items.push(row({ urgent: true, title: g.members.length === 2 ? tx('{0} are both down', andList(g.members)) : tx('{0} are all down', andList(g.members)), sub: tx('Press stops at {0}', hm(trig)), until: trig,
           actions: [bothBackBtn(g, 'btn btn-sm btn-go'), ...g.members.map(x => backBtn(x, 'btn btn-sm'))] }));
       } else {
         const others = g.members.filter(x => x !== m.name);
-        items.push(row({ title: m.name + ': ' + what(s), sub: 'Line still running', since: s.downSince,
+        items.push(row({ title: dn(m.name) + ': ' + what(s), sub: 'Line still running', since: s.downSince,
           actions: [backBtn(m.name, 'btn btn-sm btn-go')] }));
       }
     }
@@ -966,7 +997,7 @@ function setPill(el, k, text) { el.className = 'spill k-' + k; rc(el, h('i'), te
 function gaugeEl(p, label) {
   const r = 52, c = 2 * Math.PI * r, arc = c * 0.75, v = p == null ? 0 : Math.max(0, Math.min(1, p));
   const pctTxt = p == null ? '–' : Math.round(v * 100) + '%';
-  const box = h('div', { class: 'gauge' + (gaugeEl.last !== pctTxt ? ' anim' : ''), role: 'img', tabindex: '0', 'aria-label': label + ' ' + (p == null ? 'not available yet' : pctTxt), 'data-tip': gaugeEl.tip || (label + ' ' + pctTxt) });
+  const box = h('div', { class: 'gauge' + (gaugeEl.last !== pctTxt ? ' anim' : ''), role: 'img', tabindex: '0', 'aria-label': tx(label) + ' ' + (p == null ? tx('not available yet') : pctTxt), 'data-tip': gaugeEl.tip || (tx(label) + ' ' + pctTxt) });
   gaugeEl.last = pctTxt;
   box.innerHTML = '<svg viewBox="0 0 140 140" aria-hidden="true"><circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + arc.toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(135 70 70)"/>' +
     (v > 0 ? '<circle class="g-arc" cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--run)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + (arc * v).toFixed(1) + ' ' + c.toFixed(1) + '" style="--len:' + (arc * v).toFixed(1) + '" transform="rotate(135 70 70)"/>' : '') + '</svg>';
@@ -988,9 +1019,9 @@ function mStatus(m, e, line) {
   if (!e) return { k: 'unk', label: 'Not logged' };
   if (e.run) return { k: 'run', label: 'Running' };
   const causing = m.main || line.machine === m.name || (line.group && line.group.members.includes(m.name));
-  return causing ? { k: 'down', label: 'Down · ' + e.state } : { k: 'warn', label: 'Issue · line running' };
+  return causing ? { k: 'down', label: tx('Down · {0}', e.state) } : { k: 'warn', label: tx('Issue · line running') };
 }
-function ruleText(m) { const g = m.rule === 'group' ? groupOf(m.name) : null; return m.main ? 'Main machine' : g ? g.name + ' pair' : m.rule === 'optional' ? 'Line keeps running' : 'Stops the line'; }
+function ruleText(m) { const g = m.rule === 'group' ? groupOf(m.name) : null; return m.main ? tx('Main machine') : g ? tx('{0} pair', g.name) : m.rule === 'optional' ? tx('Line keeps running') : tx('Stops the line'); }
 function machineShift(L, m) {
   const g = m.rule === 'group' ? groupOf(m.name) : null, keys = g ? [m.name, g.name] : [m.name];
   const cs = L.st.causes.filter(c => keys.includes(c.machine));
@@ -1005,7 +1036,7 @@ function renderMachines(L) {
   const isDown = x => x.st.k === 'down' || x.st.k === 'warn';
   const n = { all: all.length, down: all.filter(isDown).length, run: all.filter(x => x.st.k === 'run').length };
   const view = S.mview === 'list' ? 'list' : 'grid', f = ['all', 'down', 'run'].includes(S.mfilter) ? S.mfilter : 'all';
-  const vbtn = (v, label) => h('button', { type: 'button', class: 'vbtn', 'aria-pressed': String(view === v), 'aria-label': label + ' view', onclick: () => { S.mview = v; LS.set('mview', v); renderAll(); } }, ico(v), v === 'grid' ? label : null);
+  const vbtn = (v, label) => h('button', { type: 'button', class: 'vbtn', 'aria-pressed': String(view === v), 'aria-label': tx('{0} view', tx(label)), onclick: () => { S.mview = v; LS.set('mview', v); renderAll(); } }, ico(v), v === 'grid' ? label : null);
   const fbtn = (v, label) => h('button', { type: 'button', class: 'fpill', 'aria-pressed': String(f === v), onclick: () => { S.mfilter = v; LS.set('mfilter', v); renderAll(); } }, ico('filter'), label, h('small', null, String(n[v])));
   rc($('#mTools'), h('div', { class: 'vtoggle', role: 'group', 'aria-label': 'View' }, vbtn('grid', 'Grid'), vbtn('list', 'List')),
     h('div', { class: 'fpills', role: 'group', 'aria-label': 'Show' }, fbtn('all', 'All machines'), fbtn('down', 'Down'), fbtn('run', 'Running')));
@@ -1017,7 +1048,7 @@ function renderMachines(L) {
 }
 function tileEl({ m, e, st }) {
   const color = st.k === 'run' ? 'var(--run)' : st.k === 'down' ? 'var(--down)' : st.k === 'warn' ? 'var(--warn)' : 'var(--axis)';
-  return h('button', { type: 'button', class: 'mtile k-' + st.k, onclick: () => openSheet(m.name), 'aria-label': m.name + ': ' + (e ? e.state + (e.alarm ? ', ' + e.alarm : '') : 'not logged') + '. Open.' },
+  return h('button', { type: 'button', class: 'mtile k-' + st.k, onclick: () => openSheet(m.name), 'aria-label': tx('{0}: {1}. Open.', m.name, e ? dn(e.state) + (e.alarm ? ', ' + dn(e.alarm) : '') : tx('not logged')) },
     h('span', { class: 'mt-name' }, m.name),
     h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), h('span', null, e ? (e.alarm && !e.run ? e.alarm : e.state) : 'Not logged')));
 }
@@ -1048,11 +1079,11 @@ function kpiEl(l, v, u, s, meter) {
     s ? h('span', { class: 'kpi-s' }, s) : null);
 }
 function hmParts(ms) { const m = Math.max(0, Math.round(ms / MIN)); return m < 60 ? [String(m), 'min'] : [Math.floor(m / 60) + ':' + pad(m % 60), 'h']; }
-const causeLabel = c => c.machine + ' · ' + c.state;
+const causeLabel = c => dn(c.machine) + ' · ' + dn(c.state);
 function segTip(s) {
-  const head = s.run === true ? 'Running' : s.run == null ? 'Not logged' : 'Downtime';
-  const extra = [s.alarm, s.note].filter(Boolean).join(' · ');
-  return head + (s.machine ? ': ' + s.machine + ' · ' + s.state : '') + (s.mode ? ' (' + s.mode + ')' : '') + '\n' + hm(s.start) + '–' + hm(s.end) + ' · ' + fmtDur(s.end - s.start) + (extra ? '\n' + extra : '');
+  const head = tx(s.run === true ? 'Running' : s.run == null ? 'Not logged' : 'Downtime');
+  const extra = [dn(s.alarm), s.note].filter(Boolean).join(' · ');
+  return head + (s.machine ? COLON + dn(s.machine) + ' · ' + dn(s.state) : '') + (s.mode ? ' (' + dn(s.mode) + ')' : '') + '\n' + hm(s.start) + '–' + hm(s.end) + ' · ' + fmtDur(s.end - s.start) + (extra ? '\n' + extra : '');
 }
 /* Timeline: hover shows a crosshair with the time and the block under it; tap or click a block to pin its details. */
 function renderTimeline(box, segs, from, to, now, opts) {
@@ -1086,15 +1117,15 @@ function renderTimeline(box, segs, from, to, now, opts) {
   const kids = [wrap, h('div', { class: 'tl-x' }, xs)];
   if (sel) {
     const col = segColor(sel) || 'var(--axis)', end = Math.min(sel.end, now);
-    const what = sel.run === true ? (sel.machine ? sel.machine + ' · ' + sel.state : 'Running') : sel.run == null ? 'Not logged' : (sel.group ? sel.group + ' ' + (sel.state || '').toLowerCase() : sel.machine + ' · ' + sel.state);
+    const what = sel.run === true ? (sel.machine ? dn(sel.machine) + ' · ' + dn(sel.state) : tx('Running')) : sel.run == null ? tx('Not logged') : (sel.group ? dn(sel.group) + ' · ' + dn(sel.state || '') : dn(sel.machine) + ' · ' + dn(sel.state));
     const extra = [sel.alarm === OTHER ? sel.note : sel.alarm, sel.alarm === OTHER ? '' : sel.note, sel.mode && sel.mode !== 'Auto' ? sel.mode : ''].filter(Boolean).join(' · ');
     const who = sel.personName || (sel.uid ? nameOf(sel.uid) : '');
     const canOpen = opts.open !== false && sel.run != null && (sel.machine || sel.group);
     kids.push(h('div', { class: 'tl-detail', style: '--c:' + col },
       h('i'),
-      h('div', { class: 'tld-t' }, h('b', null, what), h('span', null, hm(sel.start) + '–' + (sel.end >= now ? 'now' : hm(end)) + ' · ' + fmtDur(end - sel.start) + (extra ? ' · ' + extra : '') + (who ? ' · logged by ' + who : ''))),
+      h('div', { class: 'tld-t' }, h('b', null, what), h('span', null, hm(sel.start) + '–' + (sel.end >= now ? tx('now') : hm(end)) + ' · ' + fmtDur(end - sel.start) + (extra ? ' · ' + extra : '') + (who ? ' · ' + tx('logged by {0}', who) : ''))),
       h('div', { class: 'tld-a' },
-        canOpen ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { const g = sel.group ? groupsCfg().find(x => x.name === sel.group) : null; if (g) openSheet(null, g); else openSheet(sel.machine); } }, 'Open ' + (sel.group || sel.machine)) : null,
+        canOpen ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { const g = sel.group ? groupsCfg().find(x => x.name === sel.group) : null; if (g) openSheet(null, g); else openSheet(sel.machine); } }, tx('Open {0}', sel.group || sel.machine)) : null,
         h('button', { type: 'button', class: 'x', 'aria-label': 'Close details', onclick: () => { tipHide(); delete S.tlSel[key]; renderTimeline(box, segs, from, to, now, opts); if (opts.onPick) opts.onPick(null); } }, '×'))));
   }
   rc(box, kids);
@@ -1122,17 +1153,17 @@ function renderAnalysis() {
   buildSeg('aRange', RANGES, S.arange, v => { S.arange = v; S.abucket = null; LS.set('arange', v); renderAll(); });
   const b = rangeBounds(S.arange), D = getData(b.from);
   const empty = $('#anEmpty'), body = $('#anBody');
-  if (!D.ready) { empty.hidden = false; body.hidden = true; rc(empty, h('p', { class: 'empty-t' }, S.conn === 'offline' ? "The shared log isn't available here." : 'Loading ' + b.phrase + '…')); return; }
+  if (!D.ready) { empty.hidden = false; body.hidden = true; rc(empty, h('p', { class: 'empty-t' }, S.conn === 'offline' ? "The shared log isn't available here." : tx('Loading {0}…', b.phrase))); return; }
   const R = replay(D.seeds, D.events, b.from, b.to), st = segStats(R.segs);
-  if (st.run + st.down <= 0) { empty.hidden = false; body.hidden = true; rc(empty, h('p', { class: 'empty-t' }, 'Nothing logged in ' + b.phrase + '.'), h('p', { class: 'empty-s' }, 'Log entries from the Shift tab. This page fills in from them.')); return; }
+  if (st.run + st.down <= 0) { empty.hidden = false; body.hidden = true; rc(empty, h('p', { class: 'empty-t' }, tx('Nothing logged in {0}.', b.phrase)), h('p', { class: 'empty-s' }, 'Log entries from the Shift tab. This page fills in from them.')); return; }
   empty.hidden = true; body.hidden = false;
-  $('#anKicker').textContent = b.phrase.replace(/^./, c => c.toUpperCase()) + (useExample() ? ' · example data' : '');
+  $('#anKicker').textContent = b.phrase.replace(/^./, c => c.toUpperCase()) + (useExample() ? ' · ' + tx('example data') : '');
   const head = $('#anHead'), sub = $('#anSub');
   if (st.causes.length) {
     const top = st.causes[0], pct = Math.round(top.ms / (st.down || 1) * 100);
-    rc(head, h('span', { class: 'hl' }, top.state), ' on the ' + top.machine + ' is ' + pct + '% of the downtime.');
-    sub.textContent = 'The line ran ' + (st.avail * 100).toFixed(1) + '% of the logged time. ' + plural(st.stops, 'stop') + ' added up to ' + fmtDur(st.down) + ' of downtime' + (st.unk >= HOUR ? ', with ' + fmtDur(st.unk) + ' not logged' : '') + '.';
-  } else { head.textContent = 'No downtime in ' + b.phrase + '.'; sub.textContent = 'The line ran the whole logged time.'; }
+    rc(head, txh('{0} on the {1} is {2}% of the downtime.', h('span', { class: 'hl' }, dn(top.state)), top.machine, pct));
+    sub.textContent = tx('The line ran {0}% of the logged time.', num1(st.avail * 100)) + ' ' + (st.unk >= HOUR ? tx('{0} added up to {1} of downtime, with {2} not logged.', plural(st.stops, 'stop'), fmtDur(st.down), fmtDur(st.unk)) : tx('{0} added up to {1} of downtime.', plural(st.stops, 'stop'), fmtDur(st.down)));
+  } else { head.textContent = tx('No downtime in {0}.', b.phrase); sub.textContent = tx('The line ran the whole logged time.'); }
   const find = re => st.causes.filter(c => re.test(c.state));
   const dc = find(/die change/i), dcN = dc.reduce((t, c) => t + c.n, 0), dcMs = dc.reduce((t, c) => t + c.ms, 0);
   const fl = st.causes.filter(c => !/die change|first profile/i.test(c.state)), flN = fl.reduce((t, c) => t + c.n, 0), flMs = fl.reduce((t, c) => t + c.ms, 0);
@@ -1141,13 +1172,13 @@ function renderAnalysis() {
     kpiEl('Extrusion', fmtH(st.run), 'h', 'running time'),
     kpiEl('Downtime', fmtH(st.down), 'h', plural(st.stops, 'stop')),
     kpiEl('Availability', st.avail == null ? '–' : (st.avail * 100).toFixed(1), '%', 'extrusion ÷ logged time', st.avail),
-    kpiEl('Stops', String(st.stops), '', days >= 2 ? (st.stops / days).toFixed(1) + ' per day' : 'in this period'),
+    kpiEl('Stops', String(st.stops), '', days >= 2 ? tx('{0} per day', num1(st.stops / days)) : 'in this period'),
     dcN ? kpiEl('Avg die change', String(Math.round(dcMs / dcN / MIN)), 'min', plural(dcN, 'die change')) : kpiEl('Die changes', '0', '', 'in this period'),
-    flN ? kpiEl('MTTR', String(Math.round(flMs / flN / MIN)), 'min', plural(flN, 'breakdown') + ', die changes excluded') : kpiEl('MTTR', '–', '', 'no breakdowns'));
+    flN ? kpiEl('MTTR', String(Math.round(flMs / flN / MIN)), 'min', tx('{0}, die changes excluded', plural(flN, 'breakdown'))) : kpiEl('MTTR', '–', '', 'no breakdowns'));
   if (S.afocus && !st.causes.some(c => c.key === S.afocus)) S.afocus = null;
   const fb = $('#anFocus'), fc = S.afocus ? st.causes.find(c => c.key === S.afocus) : null;
   fb.hidden = !fc;
-  if (fc) rc(fb, h('i', { style: 'background:' + causeColor(fc.machine, fc.state) }), h('span', null, 'Showing ', h('b', null, fc.state + ' · ' + fc.machine), ' across the charts: ' + fmtDur(fc.ms) + ', ' + plural(fc.n, 'stop') + ', ' + Math.round(fc.ms / (st.down || 1) * 100) + '% of downtime.'),
+  if (fc) rc(fb, h('i', { style: 'background:' + causeColor(fc.machine, fc.state) }), h('span', null, txh('Showing {0} across the charts: {1}, {2}, {3}% of downtime.', h('b', null, dn(fc.state) + ' · ' + dn(fc.machine)), fmtDur(fc.ms), plural(fc.n, 'stop'), Math.round(fc.ms / (st.down || 1) * 100))),
     h('button', { type: 'button', class: 'btn btn-sm', onclick: () => setFocus(null) }, 'Show all'));
   renderPareto(st); renderTrend(R, b); renderIssues(R); renderModes(st); renderByShift(R, b, st);
 }
@@ -1162,12 +1193,12 @@ function renderPareto(st) {
   st.causes.forEach((c, i) => {
     const before = cum / total; cum += c.ms;
     const vital = before < 0.8;
-    if (!vital && !cut && i > 0) { out.push(h('div', { class: 'pr-cut' }, h('span', null, 'above the line: ' + Math.round(before * 100) + '% of downtime'))); cut = true; }
+    if (!vital && !cut && i > 0) { out.push(h('div', { class: 'pr-cut' }, h('span', null, tx('above the line: {0}% of downtime', Math.round(before * 100))))); cut = true; }
     const col = causeColor(c.machine, c.state);
     const on = S.afocus === c.key;
-    out.push(h('div', { class: 'pr pick' + (vital ? ' vital' : '') + (S.afocus ? (on ? ' on' : ' dim') : ''), role: 'button', tabindex: '0', 'aria-pressed': String(on), 'aria-label': causeLabel(c) + ', ' + fmtDur(c.ms) + '. ' + (on ? 'Showing across the charts. Press to show all.' : 'Press to show across the charts.'), onclick: () => setFocus(c.key), onkeydown: keyPress },
-      h('div', { class: 'pr-l' }, h('span', { class: 'pr-name' }, c.state), h('span', { class: 'pr-sub' }, c.machine + ' · ' + plural(c.n, 'stop') + ' · avg ' + fmtDur(c.ms / c.n))),
-      h('div', { class: 'pr-track' }, h('div', { class: 'pr-bar', style: 'width:' + Math.max(0.8, c.ms / max * 100).toFixed(2) + '%;background:' + col, 'data-tip': fmtDur(c.ms) + ' · ' + causeLabel(c) + '\n' + plural(c.n, 'stop') + ' · average ' + fmtDur(c.ms / c.n) + '\nLongest: ' + fmtDur(c.longest) + '\n' + Math.round(c.ms / total * 100) + '% of downtime' })),
+    out.push(h('div', { class: 'pr pick' + (vital ? ' vital' : '') + (S.afocus ? (on ? ' on' : ' dim') : ''), role: 'button', tabindex: '0', 'aria-pressed': String(on), 'aria-label': causeLabel(c) + ', ' + fmtDur(c.ms) + '. ' + tx(on ? 'Showing across the charts. Press to show all.' : 'Press to show across the charts.'), onclick: () => setFocus(c.key), onkeydown: keyPress },
+      h('div', { class: 'pr-l' }, h('span', { class: 'pr-name' }, c.state), h('span', { class: 'pr-sub' }, dn(c.machine) + ' · ' + plural(c.n, 'stop') + ' · ' + tx('avg {0}', fmtDur(c.ms / c.n)))),
+      h('div', { class: 'pr-track' }, h('div', { class: 'pr-bar', style: 'width:' + Math.max(0.8, c.ms / max * 100).toFixed(2) + '%;background:' + col, 'data-tip': fmtDur(c.ms) + ' · ' + causeLabel(c) + '\n' + plural(c.n, 'stop') + ' · ' + tx('average {0}', fmtDur(c.ms / c.n)) + '\n' + tx('Longest: {0}', fmtDur(c.longest)) + '\n' + tx('{0}% of downtime', Math.round(c.ms / total * 100)) })),
       h('div', { class: 'pr-v' }, fmtDur(c.ms)),
       h('div', { class: 'pr-c' }, Math.round(cum / total * 100) + '%')));
   });
@@ -1183,15 +1214,16 @@ function renderTrend(R, b) {
   }
   const inMin = unit === 'hour', div = inMin ? MIN : HOUR, u = inMin ? ' min' : ' h';
   const maxV = niceMax(Math.max(0, ...vals.map(v => v.total / div)));
-  $('#trSub').textContent = 'Downtime per ' + unit + ', stacked by cause, in ' + (inMin ? 'minutes' : 'hours') + '. Tap a column for its breakdown.';
+  $('#trSub').textContent = tx(unit === 'hour' ? 'Downtime per hour, stacked by cause, in minutes. Tap a column for its breakdown.' : unit === 'day' ? 'Downtime per day, stacked by cause, in hours. Tap a column for its breakdown.' : 'Downtime per week, stacked by cause, in hours. Tap a column for its breakdown.');
   const keysAll = uniq(R.segs.filter(s => s.run === false).map(s => s.machine + '|' + s.state)).sort((a, c) => causeRank(a) - causeRank(c));
-  const F = S.afocus, label = i => (B[i].unit === 'week' ? 'Week of ' : '') + (B[i].unit === 'hour' ? fmtDay(B[i].s) + ' ' : '') + B[i].label;
+  const F = S.afocus, label = i => B[i].unit === 'week' ? tx('Week of {0}', B[i].label) : (B[i].unit === 'hour' ? fmtDay(B[i].s) + ' ' : '') + B[i].label;
   if (S.abucket != null && S.abucket >= B.length) S.abucket = null;
-  const grid = [0, 0.5, 1].map(f => h('div', { class: 'tr-grid', style: 'bottom:' + (f * 100) + '%' }, h('span', null, String(+(maxV * f).toFixed(2)) + u)));
+  const grid = [0, 0.5, 1].map(f => h('div', { class: 'tr-grid', style: 'bottom:' + (f * 100) + '%' }, h('span', null, numS(+(maxV * f).toFixed(2)) + u)));
   const cols = vals.map((v, i) => {
     const keys = keysAll.filter(k => v.c[k]).sort((a, c) => v.c[c] - v.c[a]);
     const fv = F ? (v.c[F] || 0) : null;
-    const tip = (F ? fmtDur(fv) + ' ' + F.split('|')[1].toLowerCase() + ' · ' + label(i) + '\n' + fmtDur(v.total) + ' downtime in total' : (v.total ? fmtDur(v.total) : 'No') + ' downtime · ' + label(i)) + keys.slice(0, 6).map(k => '\n' + fmtDur(v.c[k]) + '  ' + k.replace('|', ' · ')).join('') + (keys.length > 6 ? '\n+' + (keys.length - 6) + ' more' : '');
+    const kl = k => { const [m0, s0] = k.split('|'); return dn(m0) + ' · ' + dn(s0); };
+    const tip = (F ? fmtDur(fv) + ' · ' + kl(F) + ' · ' + label(i) + '\n' + tx('{0} downtime in total', fmtDur(v.total)) : (v.total ? tx('{0} downtime · {1}', fmtDur(v.total), label(i)) : tx('No downtime · {0}', label(i)))) + keys.slice(0, 6).map(k => '\n' + fmtDur(v.c[k]) + '  ' + kl(k)).join('') + (keys.length > 6 ? '\n' + tx('+{0} more', keys.length - 6) : '');
     return h('div', { class: 'tr-col' + (S.abucket === i ? ' sel' : ''), tabindex: '0', role: 'button', 'aria-pressed': String(S.abucket === i), 'data-tip': tip,
       onclick: () => { tipHide(); S.abucket = S.abucket === i ? null : i; renderAll(); }, onkeydown: keyPress },
       h('div', { class: 'tr-stack', style: 'height:' + (v.total / div / maxV * 100).toFixed(2) + '%' },
@@ -1200,14 +1232,14 @@ function renderTrend(R, b) {
   const step = Math.max(1, Math.ceil(B.length / 6)), xl = [];
   for (let i = 0; i < B.length; i += step) xl.push(h('span', { style: 'left:' + ((i + 0.5) / B.length * 100).toFixed(2) + '%' }, B[i].label));
   rc($('#anTrend'), h('div', { class: 'tr-plot' + (F ? ' focused' : '') }, grid, h('div', { class: 'tr-cols' }, cols)), h('div', { class: 'tr-x' }, xl));
-  rc($('#trLegend'), keysAll.map(k => { const [m, s] = k.split('|'); return h('button', { type: 'button', class: 'lg lgb' + (F ? (F === k ? ' on' : ' dim') : ''), 'aria-pressed': String(F === k), onclick: () => setFocus(k) }, h('i', { class: 'sw', style: 'background:' + causeColor(m, s) }), m + ' · ' + s); }));
+  rc($('#trLegend'), keysAll.map(k => { const [m, s] = k.split('|'); return h('button', { type: 'button', class: 'lg lgb' + (F ? (F === k ? ' on' : ' dim') : ''), 'aria-pressed': String(F === k), onclick: () => setFocus(k) }, h('i', { class: 'sw', style: 'background:' + causeColor(m, s) }), dn(m) + ' · ' + dn(s)); }));
   const det = $('#trDetail'), i = S.abucket;
   det.hidden = i == null;
   if (i == null) return;
   const v = vals[i], keys = keysAll.filter(k => v.c[k]).sort((a, c) => v.c[c] - v.c[a]), mx = keys.length ? v.c[keys[0]] : 1;
-  rc(det, h('div', { class: 'trd-h' }, h('b', null, label(i)), h('span', null, v.total ? fmtDur(v.total) + ' downtime' : 'No downtime'), h('button', { type: 'button', class: 'x', 'aria-label': 'Close breakdown', onclick: () => { S.abucket = null; renderAll(); } }, '×')),
+  rc(det, h('div', { class: 'trd-h' }, h('b', null, label(i)), h('span', null, v.total ? tx('{0} downtime', fmtDur(v.total)) : tx('No downtime')), h('button', { type: 'button', class: 'x', 'aria-label': 'Close breakdown', onclick: () => { S.abucket = null; renderAll(); } }, '×')),
     keys.length ? keys.map(k => { const [m, st] = k.split('|'); return h('button', { type: 'button', class: 'trd-r' + (F === k ? ' on' : ''), onclick: () => { const keep = S.abucket; setFocus(k); S.abucket = keep; renderAll(); } },
-      h('span', { class: 'trd-n' }, st, h('small', null, m)), h('span', { class: 'trd-bar' }, h('i', { style: 'width:' + (v.c[k] / mx * 100).toFixed(1) + '%;background:' + causeColor(m, st) })), h('span', { class: 'trd-v' }, fmtDur(v.c[k]))); })
+      h('span', { class: 'trd-n' }, dn(st), h('small', null, dn(m))), h('span', { class: 'trd-bar' }, h('i', { style: 'width:' + (v.c[k] / mx * 100).toFixed(1) + '%;background:' + causeColor(m, st) })), h('span', { class: 'trd-v' }, fmtDur(v.c[k]))); })
       : h('p', { class: 'muted' }, 'The line ran, or nothing was logged.'));
 }
 function stoppedOverlap(segs, iv, m) {
@@ -1263,7 +1295,7 @@ function renderModes(st) {
   rc(box, h('table', { class: 't-min' },
     h('thead', null, h('tr', null, h('th', null, 'Mode'), h('th', { class: 'num' }, 'Extrusion'), h('th', { class: 'num' }, 'Downtime'), h('th', { style: 'width:30%' }, 'Share of downtime'))),
     h('tbody', null, rows.map(m => { const v = st.modes[m]; return h('tr', null, h('td', { class: 'big' }, m), h('td', { class: 'num' }, fmtDur(v.run)), h('td', { class: 'num' }, fmtDur(v.down)),
-      h('td', null, h('span', { class: 'sharebar', style: 'width:' + (v.down / maxD * 100).toFixed(1) + '%', 'data-tip': m + ': ' + (st.down ? Math.round(v.down / st.down * 100) : 0) + '% of downtime' }))); }))));
+      h('td', null, h('span', { class: 'sharebar', style: 'width:' + (v.down / maxD * 100).toFixed(1) + '%', 'data-tip': tx('{0}: {1}% of downtime', m, st.down ? Math.round(v.down / st.down * 100) : 0) }))); }))));
 }
 function renderByShift(R, b, st) {
   const periods = shiftPeriods(b.from, b.to), agg = {};
@@ -1286,11 +1318,11 @@ function renderHistory() {
   setOptions('#hMachine', [['', 'All machines'], ...machines().map(m => [m.name, m.name])], S.hmachine);
   const b = rangeBounds(S.hrange), D = getData(b.from);
   const box = $('#hList'), empty = $('#hEmpty');
-  if (!D.ready) { box.hidden = true; empty.hidden = false; rc(empty, h('p', { class: 'empty-t' }, S.conn === 'offline' ? "The shared log isn't available here." : 'Loading ' + b.phrase + '…')); $('#hCount').textContent = ''; return; }
+  if (!D.ready) { box.hidden = true; empty.hidden = false; rc(empty, h('p', { class: 'empty-t' }, S.conn === 'offline' ? "The shared log isn't available here." : tx('Loading {0}…', b.phrase))); $('#hCount').textContent = ''; return; }
   const list = historyList(b, D);
   const next = nextMap(D.events.concat(Object.values(D.seeds || {})));
-  $('#hCount').textContent = (list.length === 1 ? '1 entry' : list.length + ' entries') + ' in ' + b.phrase + (useExample() ? ' · example data' : '') + '. ' + (isAdmin() ? 'Select an entry to correct it.' : isMaint() ? 'Select one of your entries to correct it, or anyone else\'s to change its description.' : 'Select one of your entries to correct it.');
-  if (!list.length) { box.hidden = true; empty.hidden = false; rc(empty, h('p', { class: 'empty-t' }, 'No entries in ' + b.phrase + '.')); return; }
+  $('#hCount').textContent = tx('{0} in {1}', plural(list.length, 'entry'), b.phrase) + (useExample() ? ' · ' + tx('example data') : '') + '. ' + tx(isAdmin() ? 'Select an entry to correct it.' : isMaint() ? 'Select one of your entries to correct it, or anyone else\'s to change its description.' : 'Select one of your entries to correct it.');
+  if (!list.length) { box.hidden = true; empty.hidden = false; rc(empty, h('p', { class: 'empty-t' }, tx('No entries in {0}.', b.phrase))); return; }
   empty.hidden = true; box.hidden = false;
   const now = Date.now(), out = []; let day = '';
   for (const e of list.slice(0, 600)) {
@@ -1309,15 +1341,15 @@ function buildTimelineCsv() {
   const R = replay(D.seeds, D.events, b.from, Math.min(b.to, Date.now()));
   const g = S.hmachine ? groupOf(S.hmachine) : null;
   const segs = R.segs.filter(s => !S.hmachine || s.machine === S.hmachine || (g && g.name === s.group));
-  const head = ['Start', 'End', 'Minutes', 'Line', 'Shift', 'Machine', 'State', 'Alarm', 'Mode', 'Notes', 'Logged by'];
-  const rows = segs.map(s => [csvTime(s.start), csvTime(s.end), Math.round((s.end - s.start) / MIN), s.run === true ? 'Running' : s.run === false ? 'Downtime' : 'Not logged', shiftBounds(s.start).name, s.machine, s.state, s.alarm, s.mode, s.note, s.personName || (s.uid ? nameOf(s.uid) : '')]);
+  const head = ['Start', 'End', 'Minutes', 'Line', 'Shift', 'Machine', 'State', 'Alarm', 'Mode', 'Notes', 'Logged by'].map(x => tx(x));
+  const rows = segs.map(s => [csvTime(s.start), csvTime(s.end), Math.round((s.end - s.start) / MIN), tx(s.run === true ? 'Running' : s.run === false ? 'Downtime' : 'Not logged'), dn(shiftBounds(s.start).name), dn(s.machine), dn(s.state), dn(s.alarm), dn(s.mode), s.note, s.personName || (s.uid ? nameOf(s.uid) : '')]);
   return [head, ...rows].map(r => r.map(csvEsc).join(',')).join('\r\n');
 }
 function buildEntriesCsv() {
   const b = rangeBounds(S.hrange), D = getData(b.from); if (!D.ready) return '';
   const list = historyList(b, D).slice().reverse(), next = nextMap(D.events.concat(Object.values(D.seeds || {}))), now = Date.now();
-  const head = ['Time', 'Shift', 'Machine', 'State', 'Running or issue', 'Alarm', 'Mode', 'Press stopped', 'Notes', 'Minutes in state', 'Logged by'];
-  const rows = list.map(e => { const run = isRunState(e.machine, e.state, e.run); return [csvTime(e.at), shiftBounds(e.at).name, e.machine, e.state, run ? 'Running' : 'Issue', e.alarm, e.mode, !run && e.stop ? 'yes' : '', [e.note, e.code].filter(Boolean).join(' '), Math.round(((next[e.id] || now) - e.at) / MIN), whoText(e)]; });
+  const head = [txAt('Time (clock)', 'Time')].concat(['Shift', 'Machine', 'State', 'Running or issue', 'Alarm', 'Mode', 'Press stopped', 'Notes', 'Minutes in state', 'Logged by'].map(x => tx(x)));
+  const rows = list.map(e => { const run = isRunState(e.machine, e.state, e.run); return [csvTime(e.at), dn(shiftBounds(e.at).name), dn(e.machine), dn(e.state), tx(run ? 'Running' : 'Issue'), dn(e.alarm), dn(e.mode), !run && e.stop ? tx('yes') : '', [e.note, e.code].filter(Boolean).join(' '), Math.round(((next[e.id] || now) - e.at) / MIN), whoText(e)]; });
   return [head, ...rows].map(r => r.map(csvEsc).join(',')).join('\r\n');
 }
 function showCsvFallback(csv) { const t = $('#csvFallback'); t.value = csv; t.hidden = false; t.focus(); t.select(); }
@@ -1351,29 +1383,29 @@ function configFromDraft(d) {
   if (ms.filter(m => m.rule === 'main').length !== 1) throw 'Pick exactly one main machine. It sets the line state, normally the press.';
   const out = ms.map(m => {
     const name = m.name.trim(), run = m.run.trim();
-    if (!run) throw name + ' needs a running state, like Auto.';
+    if (!run) throw tx('{0} needs a running state, like Auto.', name);
     const down = m.down.map(s => ({ name: s.name.trim(), alarms: cleanAlarms(s.alarms) }));
-    if (!down.length) throw name + ' needs at least one downtime state, like Issue.';
-    if (down.some(s => !s.name)) throw 'A state on ' + name + ' has no name.';
+    if (!down.length) throw tx('{0} needs at least one downtime state, like Issue.', name);
+    if (down.some(s => !s.name)) throw tx('A state on {0} has no name.', name);
     const all = [run, ...down.map(s => s.name)];
-    if (all.some(x => x.length > 30)) throw 'State names on ' + name + ' can be up to 30 characters.';
-    if (uniq(all.map(x => x.toLowerCase())).length !== all.length) throw name + ' lists the same state twice.';
+    if (all.some(x => x.length > 30)) throw tx('State names on {0} can be up to 30 characters.', name);
+    if (uniq(all.map(x => x.toLowerCase())).length !== all.length) throw tx('{0} lists the same state twice.', name);
     const o = { name, main: m.rule === 'main', rule: m.rule, states: [runSt(run), ...down.map(s => dnSt(s.name, s.alarms))] };
     if (m.rule === 'group') {
-      const g = String(m.group || '').trim(); if (!g) throw name + ' needs a group name.';
-      const dl = Number(m.delay); if (!Number.isInteger(dl) || dl < 0 || dl > 120) throw 'The group delay on ' + name + ' must be a whole number from 0 to 120 minutes.';
+      const g = String(m.group || '').trim(); if (!g) throw tx('{0} needs a group name.', name);
+      const dl = Number(m.delay); if (!Number.isInteger(dl) || dl < 0 || dl > 120) throw tx('The group delay on {0} must be a whole number from 0 to 120 minutes.', name);
       o.group = g.slice(0, 30); o.delay = dl;
     }
     return o;
   });
   const gc = {}; out.forEach(m => { if (m.rule === 'group') gc[m.group] = (gc[m.group] || 0) + 1; });
   for (const [g, n] of Object.entries(gc)) {
-    if (n < 2) throw 'Group ' + g + ' needs at least two machines.';
-    if (out.some(m => m.name.toLowerCase() === g.toLowerCase())) throw 'Group ' + g + ' has the same name as a machine. Pick another group name.';
+    if (n < 2) throw tx('Group {0} needs at least two machines.', g);
+    if (out.some(m => m.name.toLowerCase() === g.toLowerCase())) throw tx('Group {0} has the same name as a machine. Pick another group name.', g);
   }
   const sh = d.shifts.map(s => ({ name: String(s.name || '').trim(), start: String(s.start || '').trim() }));
   if (!sh.length) throw 'Add at least one shift.';
-  for (const s of sh) { if (!s.name) throw 'Every shift needs a name.'; if (toMin(s.start) == null) throw 'Shift ' + s.name + ' needs a start time.'; }
+  for (const s of sh) { if (!s.name) throw 'Every shift needs a name.'; if (toMin(s.start) == null) throw tx('Shift {0} needs a start time.', s.name); }
   if (uniq(sh.map(s => toMin(s.start))).length !== sh.length) throw 'Two shifts start at the same time.';
   return { machines: out, shifts: sh.map(s => { const mn = toMin(s.start); return { name: s.name.slice(0, 30), start: pad(Math.floor(mn / 60)) + ':' + pad(mn % 60) }; }), equipment: uniqBy((d.equipment || []).map(x => String(x).trim().slice(0, 40)).filter(Boolean), x => x.toLowerCase()).slice(0, 80), report: { name: String((d.report || {}).name || '').trim().slice(0, 30), sub: String((d.report || {}).sub || '').trim().slice(0, 40) } };
 }
@@ -1393,7 +1425,7 @@ function drawEquipment() {
     h('label', { class: 'field' }, h('span', null, 'Company name'), h('input', { type: 'text', 'data-f': 'rname', value: d.report.name, maxlength: '30', placeholder: 'Company' })),
     h('label', { class: 'field' }, h('span', null, 'Second line'), h('input', { type: 'text', 'data-f': 'rsub', value: d.report.sub, maxlength: '40', placeholder: 'Division or plant' }))));
   rc($('#admEquip'), h('div', { class: 'alist' },
-    d.equipment.map((a, k) => h('span', { class: 'achip' }, a, h('button', { type: 'button', 'data-act': 'deleq', 'data-a': String(k), 'aria-label': 'Remove ' + a }, '×'))),
+    d.equipment.map((a, k) => h('span', { class: 'achip', translate: 'no' }, a, h('button', { type: 'button', 'data-act': 'deleq', 'data-a': String(k), 'aria-label': tx('Remove {0}', a) }, '×'))),
     h('span', { class: 'aadd' }, h('input', { type: 'text', 'data-f': 'eqadd', value: d.eqAdd || '', maxlength: '40', placeholder: 'Add equipment', 'aria-label': 'New equipment' }), h('button', { type: 'button', class: 'ibtn', 'data-act': 'addeq' }, 'Add'))));
 }
 function equipAct(act, el) {
@@ -1427,7 +1459,7 @@ function drawMachines() {
       m.down.map((s, j) => h('div', { class: 'dstate', 'data-s': String(j) },
         h('div', { class: 'ds-head' }, h('input', { type: 'text', 'data-f': 'sname', value: s.name, maxlength: '30', 'aria-label': 'State name', placeholder: 'State name' }), h('button', { type: 'button', class: 'ibtn danger', 'data-act': 'dels', disabled: m.down.length <= 1 }, 'Remove')),
         h('div', { class: 'alist' }, h('span', { class: 'alist-l' }, s.alarms.length ? 'Alarms' : 'No alarm list'),
-          s.alarms.map((a, k) => h('span', { class: 'achip' }, a, h('button', { type: 'button', 'data-act': 'dela', 'data-a': String(k), 'aria-label': 'Remove ' + a }, '×'))),
+          s.alarms.map((a, k) => h('span', { class: 'achip', translate: 'no' }, a, h('button', { type: 'button', 'data-act': 'dela', 'data-a': String(k), 'aria-label': tx('Remove {0}', a) }, '×'))),
           h('span', { class: 'aadd' }, h('input', { type: 'text', 'data-f': 'add', value: s.add || '', maxlength: '40', placeholder: 'Add alarm', 'aria-label': 'New alarm' }), h('button', { type: 'button', class: 'ibtn', 'data-act': 'adda' }, 'Add'))))),
       h('div', null, h('button', { type: 'button', class: 'btn btn-sm btn-quiet', 'data-act': 'adds' }, '+ Add state'))))));
 }
@@ -1469,7 +1501,7 @@ function adminAct(act, el) {
 async function saveConfig() {
   const err = $('#saveErr'); err.hidden = true;
   let cfg;
-  try { cfg = configFromDraft(S.draft); } catch (x) { err.textContent = String(x); err.hidden = false; return; }
+  try { cfg = configFromDraft(S.draft); } catch (x) { err.textContent = tx(String(x)); err.hidden = false; return; }
   if (!S.db) return;
   const b = $('#saveBtn'); b.disabled = true;
   try {
@@ -1491,32 +1523,32 @@ function renderPeople(force) {
   const row = u => {
     const acts = [];
     const canTouch = u.id !== me && !isMain(u) && (sup || u.role !== 'admin');
-    if (u.status === 'pending' && canTouch) acts.push(btn('Approve', 'btn-primary', b => setUser(u, { status: 'active', approvedBy: me, approvedAt: Date.now() }, b, u.name + ' approved')), btn('Decline', 'btn-quiet', b => setUser(u, { status: 'disabled' }, b, u.name + ' declined')));
-    if (u.status === 'active' && sup && u.id !== me && !isMain(u)) acts.push(u.role === 'admin' ? btn('Remove admin', 'btn-quiet', b => setUser(u, { role: 'user' }, b, u.name + ' is a user now')) : btn('Make admin', '', b => setUser(u, { role: 'admin' }, b, u.name + ' is an admin now')));
-    if (u.status === 'active' && canTouch) acts.push(btn('Turn off', 'btn-quiet', b => { if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Press again'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Turn off'; } }, 4000); return; } setUser(u, { status: 'disabled' }, b, u.name + ' turned off'); }));
-    if (u.status === 'disabled' && canTouch) acts.push(btn('Turn back on', '', b => setUser(u, { status: 'active' }, b, u.name + ' turned back on')));
+    if (u.status === 'pending' && canTouch) acts.push(btn('Approve', 'btn-primary', b => setUser(u, { status: 'active', approvedBy: me, approvedAt: Date.now() }, b, tx('{0} approved', u.name))), btn('Decline', 'btn-quiet', b => setUser(u, { status: 'disabled' }, b, tx('{0} declined', u.name))));
+    if (u.status === 'active' && sup && u.id !== me && !isMain(u)) acts.push(u.role === 'admin' ? btn('Remove admin', 'btn-quiet', b => setUser(u, { role: 'user' }, b, tx('{0} is a user now', u.name))) : btn('Make admin', '', b => setUser(u, { role: 'admin' }, b, tx('{0} is an admin now', u.name))));
+    if (u.status === 'active' && canTouch) acts.push(btn('Turn off', 'btn-quiet', b => { if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Press again'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Turn off'; } }, 4000); return; } setUser(u, { status: 'disabled' }, b, tx('{0} turned off', u.name)); }));
+    if (u.status === 'disabled' && canTouch) acts.push(btn('Turn back on', '', b => setUser(u, { status: 'active' }, b, tx('{0} turned back on', u.name))));
     if (canTouch) acts.push(btn('Delete', 'btn-danger', b => {
       if (!b.dataset.armed) { b.dataset.armed = '1'; b.classList.add('armed'); b.textContent = 'Press again to delete'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.classList.remove('armed'); b.textContent = 'Delete'; } }, 4000); return; }
       deleteUser(u, b);
     }));
-    const teamSel = u.status !== 'disabled' && (canTouch || (sup && u.id !== me)) ? h('select', { class: 'sel team-sel', 'aria-label': 'Team for ' + u.name, onchange: e => setUser(u, { team: e.target.value }, e.target, u.name + (e.target.value === 'maintenance' ? ' is on the maintenance team now' : ' is an operator now')) },
+    const teamSel = u.status !== 'disabled' && (canTouch || (sup && u.id !== me)) ? h('select', { class: 'sel team-sel', 'aria-label': tx('Team for {0}', u.name), onchange: e => setUser(u, { team: e.target.value }, e.target, tx(e.target.value === 'maintenance' ? '{0} is on the maintenance team now' : '{0} is an operator now', u.name)) },
       [['operator', 'Operator'], ['maintenance', 'Maintenance']].map(([v, l]) => { const o = h('option', { value: v }, l); if (u.team === v) o.selected = true; return o; })) : null;
     return h('div', { class: 'prow' }, h('span', { class: 'avatar' }, initials(u.name)),
-      h('span', { class: 'p-name' }, u.name, u.id === me ? h('small', null, 'you') : null, h('small', { style: 'display:block;margin-left:0' }, u.email)),
+      h('span', { class: 'p-name' }, h('span', { translate: 'no' }, u.name), u.id === me ? h('small', null, 'you') : null, h('small', { style: 'display:block;margin-left:0', translate: 'no' }, u.email)),
       h('span', { class: 'p-chips' }, h('span', { class: 'rchip' + (u.role === 'admin' ? ' admin' : '') }, isMain(u) ? 'Main admin' : u.role === 'admin' ? 'Admin' : 'User'), teamSel || h('span', { class: 'rchip' + (u.team === 'maintenance' ? ' maint' : '') }, u.team === 'maintenance' ? 'Maintenance' : 'Operator')),
       h('span', { class: 'form-actions', style: 'gap:6px;justify-content:flex-end' }, acts));
   };
   const by = st => S.users.filter(u => u.status === st).sort((a, c) => a.name.localeCompare(c.name));
   const pend = by('pending'), act = by('active'), off = by('disabled');
   rc($('#admPeople'),
-    pend.length ? h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, 'Waiting for approval (' + pend.length + ')'), pend.map(row)) : null,
-    h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, 'Active (' + act.length + ')'), act.length ? act.map(row) : h('p', { class: 'muted' }, 'Nobody yet.')),
-    off.length ? h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, 'Turned off (' + off.length + ')'), off.map(row)) : null,
-    h('p', { class: 'panel-sub' }, 'New people sign in with Google or email on the sign-in screen, then show up here for approval. Set each person\'s team: operators log the line, maintenance also gets the Maintenance tab and its job reports. Turn off blocks someone for good. Delete removes their account from the app but keeps their past entries; if they sign in again they come back as a new request. ' + (sup ? 'Only you can make or remove admins.' : 'Only the main admin can make or remove admins.')));
+    pend.length ? h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, tx('Waiting for approval ({0})', pend.length)), pend.map(row)) : null,
+    h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, tx('Active ({0})', act.length)), act.length ? act.map(row) : h('p', { class: 'muted' }, 'Nobody yet.')),
+    off.length ? h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, tx('Turned off ({0})', off.length)), off.map(row)) : null,
+    h('p', { class: 'panel-sub' }, 'New people sign in with Google or email on the sign-in screen, then show up here for approval. Set each person\'s team: operators log the line, maintenance also gets the Maintenance tab and its job reports. Turn off blocks someone for good. Delete removes their account from the app but keeps their past entries; if they sign in again they come back as a new request. ', sup ? 'Only you can make or remove admins.' : 'Only the main admin can make or remove admins.'));
 }
 async function deleteUser(u, btn) {
   if (btn) btn.disabled = true;
-  try { await S.db.collection('users').doc(u.id).delete(); toast(u.name + ' deleted. Their past entries stay in the history.'); }
+  try { await S.db.collection('users').doc(u.id).delete(); toast(tx('{0} deleted. Their past entries stay in the history.', u.name)); }
   catch (x) { toast(fbMsg(x)); if (btn) btn.disabled = false; }
 }
 async function setUser(u, patch, btn, msg) {
@@ -1546,7 +1578,7 @@ function renderSessions() {
     h('tbody', null, list.map(s => {
       const nm = (userById(s.uid) || {}).name || s.name, end = s.clockOut || now;
       return h('tr', null,
-        h('td', { class: 'big' }, nm),
+        h('td', { class: 'big', translate: 'no' }, nm),
         h('td', null, fmtDay(s.clockIn)),
         h('td', { class: 'mono' }, hm(s.clockIn)),
         h('td', { class: 'mono' }, s.open ? h('span', { class: 'schip', style: '--c:var(--run)' }, h('i'), 'On shift') : (s.clockOut ? hm(s.clockOut) : '—')),
@@ -1558,7 +1590,7 @@ function renderSessions() {
 }
 async function adminClockOut(s, nm, btn) {
   btn.disabled = true;
-  try { await S.db.collection('sessions').doc(s.id).update({ open: false, clockOut: Date.now(), closedBy: myUid() }); toast(nm + ' clocked out'); }
+  try { await S.db.collection('sessions').doc(s.id).update({ open: false, clockOut: Date.now(), closedBy: myUid() }); toast(tx('{0} clocked out', nm)); }
   catch (x) { toast(fbMsg(x)); btn.disabled = false; }
 }
 
@@ -1588,11 +1620,12 @@ function writeEvents(items, toastText) {
   const now = Date.now(), col = S.db.collection('events');
   const refs = items.map(d => { const r = col.doc(); r.set(docFor(d, now)).catch(x => toast(fbMsg(x))); return r; });
   S.hasAny = true; S.exampleForced = false;
-  toast(toastText + (S.online ? '' : ' on this device. It syncs when you are back online.'), { label: 'Undo', fn: () => { refs.forEach(r => r.delete().catch(() => {})); toast(refs.length > 1 ? 'Entries removed' : 'Entry removed'); } });
+  toast(S.online ? toastText : tx('{0} on this device. It syncs when you are back online.', toastText), { label: 'Undo', fn: () => { refs.forEach(r => r.delete().catch(() => {})); toast(refs.length > 1 ? 'Entries removed' : 'Entry removed'); } });
   renderAll();
   return { ok: true };
 }
-const writeEvent = d => writeEvents([d], d.toast || (d.machine + ': ' + d.state + (d.alarm ? ' · ' + d.alarm : '') + ' logged'));
+const loggedTxt = (who, st, al) => al ? tx('{0}: {1} · {2} logged', who, st, al) : tx('{0}: {1} logged', who, st);
+const writeEvent = d => writeEvents([d], d.toast || loggedTxt(d.machine, d.state, d.alarm));
 async function quickLog(machine, state, mode, btn) {
   const cur = realCurrent(machine);
   if (btn) btn.disabled = true;
@@ -1602,18 +1635,18 @@ async function quickLog(machine, state, mode, btn) {
 async function groupLog(g, state, mode, btn) {
   const now = Date.now();
   const items = g.members.filter(mm => { const c = realCurrent(mm); return !(c && c.state === state && c.mode === mode); }).map(mm => ({ machine: mm, state, mode, at: now }));
-  if (!items.length) { toast(andList(g.members) + ' are already ' + state + '.'); return; }
+  if (!items.length) { toast(tx('{0} are already {1}.', andList(g.members), state)); return; }
   if (btn) btn.disabled = true;
-  const r = await writeEvents(items, groupLabel(g) + ': ' + state + ' logged');
+  const r = await writeEvents(items, loggedTxt(groupLabel(g), state));
   if (!r.ok) { toast(r.msg); if (btn) btn.disabled = false; }
 }
-function bothBackBtn(g, cls) { const t = runStateOf(g.members[0]); return actBtn(groupLabel(g) + ' back to ' + t, cls, b => groupLog(g, t, 'Auto', b)); }
+function bothBackBtn(g, cls) { const t = runStateOf(g.members[0]); return actBtn(tx('{0} back to {1}', groupLabel(g), t), cls, b => groupLog(g, t, 'Auto', b)); }
 async function setPressStop(machine, stop, btn) {
   const cur = realCurrent(machine);
-  if (!cur || isRunState(machine, cur.state, cur.run)) { toast('The ' + machine.toLowerCase() + ' has no open issue.'); return; }
+  if (!cur || isRunState(machine, cur.state, cur.run)) { toast(tx('The {0} has no open issue.', machine.toLowerCase())); return; }
   if (btn) btn.disabled = true;
   const r = await writeEvent({ machine, state: cur.state, mode: cur.mode || 'Auto', at: Date.now(), alarm: cur.alarm, note: cur.note, stop,
-    toast: stop ? 'Press stopped for ' + machine.toLowerCase() + ': ' + (cur.alarm || cur.state) : 'Press restarted. ' + machine + ' issue still open' });
+    toast: stop ? tx('Press stopped for {0}: {1}', machine.toLowerCase(), cur.alarm || cur.state) : tx('Press restarted. {0} issue still open', machine) });
   if (!r.ok) { toast(r.msg); if (btn) btn.disabled = false; }
 }
 
@@ -1633,19 +1666,19 @@ function sheetInfo(m, st) {
   const mc = cfgMachine(m), P = primary();
   if (!mc) return '';
   const run = isRunState(m, st);
-  if (run) return m === P ? 'Extrusion clock starts. Downtime stops.' : (mc.rule === 'always' ? 'Clears the ' + m.toLowerCase() + ' issue. The line goes back to what the ' + P.toLowerCase() + ' is doing.' : '');
-  if (mc.main) return 'Downtime until someone logs ' + runStateOf(P) + '.';
-  if (mc.rule === 'always') return 'Stops the extrusion clock until the ' + m.toLowerCase() + ' is back to ' + runStateOf(m) + '.';
-  if (mc.rule === 'optional') return 'Extrusion keeps running unless you stop the press. If the fix takes long, stop it here or later from the Shift screen.';
+  if (run) return m === P ? tx('Extrusion clock starts. Downtime stops.') : (mc.rule === 'always' ? tx('Clears the {0} issue. The line goes back to what the {1} is doing.', m.toLowerCase(), P.toLowerCase()) : '');
+  if (mc.main) return tx('Downtime until someone logs {0}.', runStateOf(P));
+  if (mc.rule === 'always') return tx('Stops the extrusion clock until the {0} is back to {1}.', m.toLowerCase(), runStateOf(m));
+  if (mc.rule === 'optional') return tx('Extrusion keeps running unless you stop the press. If the fix takes long, stop it here or later from the Shift screen.');
   const g = groupOf(m); if (!g) return '';
   const others = g.members.filter(x => x !== m), down = others.filter(x => { const c = sheetCurrent(x); return c && !c.run; });
   return down.length === others.length
-    ? andList(others) + (others.length === 1 ? ' is' : ' are') + ' already down. If they stay down together, the press stops after ' + g.delay + ' min.'
-    : 'Extrusion keeps running. The press stops only if ' + andList(g.members) + ' are all down together for ' + g.delay + ' min. Use ' + groupLabel(g) + ' if they went down together.';
+    ? tx(others.length === 1 ? '{0} is already down. If they stay down together, the press stops after {1} min.' : '{0} are already down. If they stay down together, the press stops after {1} min.', andList(others), g.delay)
+    : tx('Extrusion keeps running. The press stops only if {0} are all down together for {1} min. Use {2} if they went down together.', andList(g.members), g.delay, groupLabel(g));
 }
 function groupInfo(g, st) {
-  if (isRunState(g.members[0], st)) return 'Logs ' + andList(g.members) + ' back to ' + st + ' at the same time. Extrusion carries on with whatever the press is doing.';
-  return 'Logs ' + andList(g.members) + ' down together, one entry each. ' + (g.delay ? 'The press stops ' + g.delay + ' min after both are down unless one is back first.' : 'The press stops right away.');
+  if (isRunState(g.members[0], st)) return tx('Logs {0} back to {1} at the same time. Extrusion carries on with whatever the press is doing.', andList(g.members), st);
+  return tx('Logs {0} down together, one entry each.', andList(g.members)) + ' ' + (g.delay ? tx('The press stops {0} min after both are down unless one is back first.', g.delay) : tx('The press stops right away.'));
 }
 function groupDot(g) {
   const cs = g.members.map(x => sheetCurrent(x));
@@ -1668,16 +1701,16 @@ function renderSheet(soft) {
   else if (!S.session) rc(n0, 'Clock in first to log entries. ', h('button', { type: 'button', class: 'btn btn-sm btn-primary', style: 'margin-left:6px', onclick: () => { clockIn(); renderSheet(); } }, 'Clock in now'));
   else if (useExample()) n0.textContent = 'You are looking at example data. This entry is saved for real and starts your line clock.';
   else n0.hidden = true;
-  $('#shKicker').textContent = (target ? 'Log a change' : 'Log a change · pick the machine') + (S.session ? ' · ' + myName() : '');
-  $('#shTitle').textContent = target || 'Which machine?';
+  $('#shKicker').textContent = tx(target ? 'Log a change' : 'Log a change · pick the machine') + (S.session ? ' · ' + myName() : '');
+  $('#shTitle').textContent = target ? dn(target) : tx('Which machine?');
   let nowTxt;
-  if (g) nowTxt = 'Now: ' + g.members.map(x => { const c = sheetCurrent(x); return x + ' ' + (c ? c.state : 'not logged'); }).join(' · ');
+  if (g) nowTxt = tx('Now: {0}', g.members.map(x => { const c = sheetCurrent(x); return dn(x) + ' ' + (c ? dn(c.state) : tx('not logged')); }).join(' · '));
   else if (m) {
     const cur = sheetCurrent(m);
     if (cur) {
       const since = cur.run ? cur.at : cur.downSince;
-      nowTxt = [h('span', { class: 'sh-st', style: '--c:' + (cur.run ? 'var(--run)' : 'var(--down)') }, h('i'), [cur.state, cur.alarm === OTHER ? cur.note : cur.alarm, cur.mode && cur.mode !== cur.state && cur.mode !== 'Auto' ? cur.mode : '', cur.stop && !cur.run ? 'press stopped' : ''].filter(Boolean).join(' · ')),
-        h('span', { class: 'sh-clock' }, h('b', { 'data-since': String(since) }, clock(now - since)), h('small', null, 'since ' + fmtWhen(since)))];
+      nowTxt = [h('span', { class: 'sh-st', style: '--c:' + (cur.run ? 'var(--run)' : 'var(--down)') }, h('i'), [dn(cur.state), cur.alarm === OTHER ? cur.note : dn(cur.alarm), cur.mode && cur.mode !== cur.state && cur.mode !== 'Auto' ? dn(cur.mode) : '', cur.stop && !cur.run ? tx('press stopped') : ''].filter(Boolean).join(' · ')),
+        h('span', { class: 'sh-clock' }, h('b', { 'data-since': String(since) }, clock(now - since)), h('small', null, tx('since {0}', fmtWhen(since))))];
     } else nowTxt = 'Nothing logged for this machine yet.';
   }
   else nowTxt = 'Start with the machine, then what it is doing.';
@@ -1690,12 +1723,12 @@ function renderSheet(soft) {
     for (const x of machines()) {
       const c = sheetCurrent(x.name);
       opts.push(h('button', { type: 'button', class: 'opt', style: '--c:' + (c ? (c.run ? 'var(--run)' : causeColor(x.name, c.state)) : 'var(--axis)'), onclick: () => { SH.machine = x.name; SH.group = null; SH.state = null; SH.alarm = null; renderSheet(); } },
-        h('i'), h('span', { class: 'opt-t' }, x.name, h('small', null, c ? c.state + (c.mode && c.mode !== c.state ? ' · ' + c.mode : '') : 'Not logged'))));
+        h('i'), h('span', { class: 'opt-t' }, x.name, h('small', null, c ? dn(c.state) + (c.mode && c.mode !== c.state ? ' · ' + dn(c.mode) : '') : tx('Not logged')))));
       const gg = x.rule === 'group' ? groupOf(x.name) : null;
       if (gg && !seenG.has(gg.name) && gg.members[gg.members.length - 1] === x.name) {
         seenG.add(gg.name);
         opts.push(h('button', { type: 'button', class: 'opt', style: '--c:' + groupDot(gg), onclick: () => { SH.group = gg; SH.machine = null; SH.state = null; SH.alarm = null; renderSheet(); } },
-          h('i'), h('span', { class: 'opt-t' }, groupLabel(gg), h('small', null, 'Logs ' + andList(gg.members) + ' together'))));
+          h('i'), h('span', { class: 'opt-t' }, groupLabel(gg), h('small', null, tx('Logs {0} together', andList(gg.members))))));
       }
     }
     rc($('#shMachines'), opts);
@@ -1706,11 +1739,11 @@ function renderSheet(soft) {
   if (gl) $('#shGroupLink').textContent = groupLabel(gl);
   const key = g ? g.members[0] : m;
   if (target && mc) {
-    $('#shStateLbl').textContent = g ? 'What are ' + andList(g.members) + ' doing now?' : 'What is the ' + m.toLowerCase() + ' doing now?';
+    $('#shStateLbl').textContent = g ? tx('What are {0} doing now?', andList(g.members)) : tx('What is the {0} doing now?', m.toLowerCase());
     const isNow = s => (g ? g.members : [m]).every(x => { const c = sheetCurrent(x); return c && c.state === s.name; });
     const kindLbl = s => s.run ? 'Running' : g ? (g.members.length === 2 ? 'Both down' : 'All down') : (mc.main || mc.rule === 'always') ? 'Downtime' : 'Issue';
     rc($('#shStates'), mc.states.map(s => h('button', { type: 'button', class: 'opt', 'aria-pressed': String(SH.state === s.name), style: '--c:' + (s.run ? 'var(--run)' : causeColor(key, s.name)), onclick: () => pickState(s.name) },
-      h('i'), h('span', { class: 'opt-t' }, s.name, h('small', null, kindLbl(s) + (s.alarms && s.alarms.length ? ' · ' + plural(s.alarms.length, 'alarm') : ''))), isNow(s) ? h('span', { class: 'opt-cur' }, 'Now') : null)));
+      h('i'), h('span', { class: 'opt-t' }, s.name, h('small', null, tx(kindLbl(s)) + (s.alarms && s.alarms.length ? ' · ' + plural(s.alarms.length, 'alarm') : ''), isNow(s) ? h('span', { class: 'opt-cur' }, txAt('Now (current state)', 'Now')) : null)))));
   }
   const rest = !!(target && SH.state);
   const runSel = rest && isRunState(key, SH.state), down = rest && !runSel;
@@ -1741,7 +1774,8 @@ function renderSheet(soft) {
     $('#shAt').hidden = !SH.custom;
   }
   const sub = $('#shSubmit');
-  sub.textContent = SH.state ? 'Log ' + SH.state + (SH.alarm && SH.alarm !== OTHER ? ': ' + SH.alarm : '') + (g ? (g.members.length === 2 ? ' on both' : ' on all') : '') + (optional && SH.stop ? ' and stop the press' : '') : (target ? 'Choose what it is doing' : 'Choose a machine');
+  const what = dn(SH.state) + (SH.alarm && SH.alarm !== OTHER ? COLON + dn(SH.alarm) : '');
+  sub.textContent = SH.state ? tx(g ? (g.members.length === 2 ? 'Log {0} on both' : 'Log {0} on all') : (optional && SH.stop ? 'Log {0} and stop the press' : 'Log {0}'), what) : tx(target ? 'Choose what it is doing' : 'Choose a machine');
   sub.className = 'btn btn-lg btn-block ' + (runSel ? 'btn-go' : (optional && SH.stop) ? 'btn-stop' : 'btn-primary');
   sub.disabled = !SH.state || !canLog();
 }
@@ -1794,21 +1828,21 @@ async function submitSheet(e) {
     const items = [];
     for (const mm of g.members) {
       const cur = realCurrent(mm);
-      if (cur && at < cur.at) return shErr('That is before the last ' + mm + ' entry at ' + fmtWhen(cur.at) + '. Pick a later time, or correct that entry in History.');
+      if (cur && at < cur.at) return shErr(tx('That is before the last {0} entry at {1}. Pick a later time, or correct that entry in History.', mm, fmtWhen(cur.at)));
       if (cur && cur.state === stName && cur.mode === mode && (cur.alarm || '') === alarm) continue;
       items.push({ machine: mm, state: stName, mode, at, alarm, note });
     }
-    if (!items.length) return shErr(andList(g.members) + ' are already in ' + stName + ', ' + mode + '.');
+    if (!items.length) return shErr(tx('{0} are already in {1}, {2}.', andList(g.members), stName, mode));
     btn.disabled = true;
-    const r = await writeEvents(items, groupLabel(g) + ': ' + stName + (alarm ? ' · ' + alarm : '') + ' logged');
+    const r = await writeEvents(items, loggedTxt(groupLabel(g), stName, alarm));
     btn.disabled = false;
     if (r.ok) closeSheet(); else shErr(r.msg);
     return;
   }
   const cur = realCurrent(m);
   const stop = down && ruleOf(m) === 'optional' && SH.stop;
-  if (cur && at < cur.at) return shErr('That is before the ' + m.toLowerCase() + "'s last entry at " + fmtWhen(cur.at) + '. Pick a later time, or correct that entry in History.');
-  if (cur && cur.state === stName && cur.mode === mode && !!cur.stop === stop && (cur.alarm || '') === alarm && !note) return shErr('The ' + m.toLowerCase() + ' is already in ' + stName + (alarm ? ' · ' + alarm : '') + ', ' + mode + '.');
+  if (cur && at < cur.at) return shErr(tx("That is before the {0}'s last entry at {1}. Pick a later time, or correct that entry in History.", m.toLowerCase(), fmtWhen(cur.at)));
+  if (cur && cur.state === stName && cur.mode === mode && !!cur.stop === stop && (cur.alarm || '') === alarm && !note) return shErr(alarm ? tx('The {0} is already in {1} · {2}, {3}.', m.toLowerCase(), stName, alarm, mode) : tx('The {0} is already in {1}, {2}.', m.toLowerCase(), stName, mode));
   btn.disabled = true;
   const r = await writeEvent({ machine: m, state: stName, mode, at, stop, alarm, note });
   btn.disabled = false;
@@ -1840,10 +1874,10 @@ function ckRow(m) {
   return h('div', { class: 'ck-row' + (run ? '' : ' is-down'), id: 'ck-' + m.name.replace(/\s+/g, '_') },
     h('div', { class: 'ck-head' },
       h('span', { class: 'ck-name' }, m.name),
-      h('select', { class: 'ck-mode', 'aria-label': m.name + ' mode', onchange: e => { r.mode = e.target.value; } }, MODES.map(md => { const o = h('option', { value: md }, md); if (md === r.mode) o.selected = true; return o; }))),
-    h('div', { class: 'chips', role: 'group', 'aria-label': m.name + ' state' }, m.states.map(s => h('button', { type: 'button', class: 'chip', style: '--c:' + color(s), 'aria-pressed': String(r.state === s.name),
+      h('select', { class: 'ck-mode', 'aria-label': tx('{0} mode', m.name), onchange: e => { r.mode = e.target.value; } }, MODES.map(md => { const o = h('option', { value: md }, md); if (md === r.mode) o.selected = true; return o; }))),
+    h('div', { class: 'chips', role: 'group', 'aria-label': tx('{0} state', m.name) }, m.states.map(s => h('button', { type: 'button', class: 'chip', style: '--c:' + color(s), 'aria-pressed': String(r.state === s.name),
       onclick: () => set({ state: s.name, alarm: '', note: '', stop: false, mode: s.run ? 'Auto' : r.mode }) }, h('i'), s.name))),
-    !run && alarms.length ? h('select', { class: 'ck-alarm', 'aria-label': m.name + ' alarm', onchange: e => set({ alarm: e.target.value }) },
+    !run && alarms.length ? h('select', { class: 'ck-alarm', 'aria-label': tx('{0} alarm', m.name), onchange: e => set({ alarm: e.target.value }) },
       [h('option', { value: '' }, 'Which alarm?')].concat(alarms.concat([OTHER]).map(a => { const o = h('option', { value: a }, a); if (a === r.alarm) o.selected = true; return o; }))) : null,
     !run && (r.alarm === OTHER || !alarms.length) ? h('input', { type: 'text', class: 'ck-note', maxlength: '120', placeholder: r.alarm === OTHER ? 'Describe the problem' : 'Notes (optional)', value: r.note, oninput: e => { r.note = e.target.value; } }) : null,
     !run && m.rule === 'optional' ? h('label', { class: 'ck-stop' }, h('input', { type: 'checkbox', checked: r.stop, onchange: e => { r.stop = e.target.checked; } }), 'Press stopped for this') : null);
@@ -1859,8 +1893,8 @@ async function submitCheck(e) {
     const r = CK.rows[m.name]; if (!r) continue;
     const run = isRunState(m.name, r.state), alarms = run ? [] : alarmsFor(m.name, r.state);
     const note = run ? '' : r.note.trim();
-    if (alarms.length && !r.alarm) return ckErr('Pick the alarm for the ' + m.name.toLowerCase() + '.');
-    if (r.alarm === OTHER && !note) return ckErr('Describe the problem on the ' + m.name.toLowerCase() + '.');
+    if (alarms.length && !r.alarm) return ckErr(tx('Pick the alarm for the {0}.', m.name.toLowerCase()));
+    if (r.alarm === OTHER && !note) return ckErr(tx('Describe the problem on the {0}.', m.name.toLowerCase()));
     const alarm = run ? '' : r.alarm;
     const stop = !run && m.rule === 'optional' && r.stop;
     snap.push({ machine: m.name, state: r.state, mode: r.mode, alarm });
@@ -1892,7 +1926,7 @@ function openEdit(id) {
   const full = canEditEntry(e), noteOnly = canNoteEntry(e), ro = !full && !noteOnly;
   S.editNoteOnly = noteOnly;
   $('#edKicker').textContent = fmtDay(e.at) + ' · ' + hm(e.at);
-  $('#edTitle').textContent = e.machine + ': ' + e.state;
+  $('#edTitle').textContent = dn(e.machine) + COLON + dn(e.state);
   const mc = cfgMachine(e.machine);
   setOptions('#ed-state', uniq([...(mc ? mc.states.map(s => s.name) : []), e.state]).map(s => [s, s]), e.state);
   setOptions('#ed-mode', [['', 'Not set'], ...MODES.map(m => [m, m])], e.mode);
@@ -1902,7 +1936,7 @@ function openEdit(id) {
   $('#ed-stop').value = e.stop ? '1' : '';
   $('#ed-at').value = toLocalInput(e.at); $('#ed-note').value = noteOnly ? e.note : [e.note, e.code].filter(Boolean).join(' ');
   const meta = $('#edMeta'); meta.replaceChildren();
-  if (!e.example) { meta.append('Logged by ', whoEl(e), ' · saved ' + fmtWhen(e.createdAt) + (e.updatedAt && e.updatedAt - e.createdAt > 5000 ? ' · edited ' + fmtWhen(e.updatedAt) : '') + (e.noteByName ? ' · description by ' + (userById(e.noteBy) ? userById(e.noteBy).name : e.noteByName) : '')); fillNames(meta); }
+  if (!e.example) { meta.append(...txh('Logged by {0}', whoEl(e)), ' · ' + [tx('saved {0}', fmtWhen(e.createdAt)), e.updatedAt && e.updatedAt - e.createdAt > 5000 ? tx('edited {0}', fmtWhen(e.updatedAt)) : '', e.noteByName ? tx('description by {0}', userById(e.noteBy) ? userById(e.noteBy).name : e.noteByName) : ''].filter(Boolean).join(' · ')); fillNames(meta); }
   $$('#edForm input, #edForm select').forEach(i => { i.disabled = ro || (noteOnly && i.id !== 'ed-note'); });
   $('#edActions').hidden = ro;
   $('#edDelete').hidden = noteOnly;
@@ -1910,7 +1944,7 @@ function openEdit(id) {
   const del = $('#edDelete'); del.classList.remove('armed'); del.textContent = 'Delete';
   const note = $('#edNote');
   note.textContent = e.example ? 'This is an example entry. It is not saved anywhere.'
-    : noteOnly ? 'Logged by ' + whoText(e) + '. As maintenance you can change the description. The time, state, mode and alarm stay as they were logged.'
+    : noteOnly ? tx('Logged by {0}. As maintenance you can change the description. The time, state, mode and alarm stay as they were logged.', whoText(e))
     : ro ? 'Only admins and the person who logged this entry can change it.'
     : 'Changing the time or state recalculates the timeline for everyone.';
   note.hidden = false;
@@ -1971,7 +2005,7 @@ function loadJsPDF() {
 function reportCurrent(btn) {
   if (S.session) return makeReport({ name: myName(), from: S.session.clockIn, to: Date.now(), out: false }, btn);
   const sb = shiftBounds(Date.now());
-  return makeReport({ name: S.conn === 'live' ? myName() + ' (not clocked in)' : 'Example operator', from: sb.start, to: Date.now(), out: false, shiftOnly: true }, btn);
+  return makeReport({ name: S.conn === 'live' ? tx('{0} (not clocked in)', myName()) : tx('Example operator'), from: sb.start, to: Date.now(), out: false, shiftOnly: true }, btn);
 }
 async function makeReport(o, btn) {
   if (btn) btn.disabled = true;
@@ -2001,25 +2035,25 @@ function drawReport(jsPDF, o, D) {
   const C = { ink: [17, 26, 35], ink2: [71, 82, 94], muted: [108, 119, 131], line: [213, 218, 224], panel2: [239, 242, 244], hmi: [26, 37, 48], hmiInk: [233, 238, 243], hmiMuted: [159, 176, 193] };
   const ctx = { M, W, PH, C };
   const sb = shiftBounds(from), P = primary();
-  const txt = (s, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || C.ink)); doc.text(String(s), x, y, opt || {}); };
+  const txt = (s, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || C.ink)); doc.text(pdfSafe(tr(String(s))), x, y, opt || {}); };
   doc.setLineHeightFactor(1.35);
   // header band
   doc.setFillColor(...C.hmi); doc.rect(0, 0, PW, 32, 'F');
-  txt('EXTRUSION LINE  ·  SHIFT REPORT' + (example ? '  ·  EXAMPLE DATA' : ''), M, 11, 7.5, 'bold', C.hmiMuted);
-  txt(sb.name.toUpperCase() + ' SHIFT', M, 23, 22, 'bold', C.hmiInk);
+  txt(tx('EXTRUSION LINE  ·  SHIFT REPORT') + (example ? '  ·  ' + tx('EXAMPLE DATA') : ''), M, 11, 7.5, 'bold', C.hmiMuted);
+  txt(tx('{0} SHIFT', dn(sb.name).toUpperCase()), M, 23, 22, 'bold', C.hmiInk);
   txt(longDate(from), PW - M, 16, 10, 'normal', C.hmiInk, { align: 'right' });
-  txt('Scheduled ' + hm(sb.start) + ' - ' + hm(sb.end), PW - M, 22, 9, 'normal', C.hmiMuted, { align: 'right' });
+  txt(tx('Scheduled {0} - {1}', hm(sb.start), hm(sb.end)), PW - M, 22, 9, 'normal', C.hmiMuted, { align: 'right' });
   // who and when
   let y = 42;
   const info = [['Operator', o.name], [o.shiftOnly ? 'From' : 'Clocked in', fmtDate(from) + ' ' + hm(from)], [o.out ? 'Clocked out' : 'Report time', fmtDate(to) + ' ' + hm(to)], ['Time covered', fmtDur(to - from)]];
-  info.forEach(([l, v], i) => { const x = M + i * (W / 4); txt(l.toUpperCase(), x, y, 7, 'bold', C.muted); txt(doc.splitTextToSize(String(v), W / 4 - 3)[0], x, y + 6, 11, 'bold'); });
+  info.forEach(([l, v], i) => { const x = M + i * (W / 4); txt(tr(l).toUpperCase(), x, y, 7, 'bold', C.muted); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); txt(doc.splitTextToSize(pdfSafe(String(v)), W / 4 - 3)[0], x, y + 6, 11, 'bold'); });
   y += 13;
   // numbers
   doc.setFillColor(...C.panel2); doc.roundedRect(M, y, W, 21, 2, 2, 'F');
-  [['Extrusion', fmtDur(st.run)], ['Downtime', fmtDur(st.down)], ['Availability', st.avail == null ? '-' : (st.avail * 100).toFixed(1) + ' %'], ['Stops', String(st.stops)]]
-    .forEach(([l, v], i) => { const x = M + 5 + i * (W / 4); txt(l.toUpperCase(), x, y + 7, 7, 'bold', C.ink2); txt(v, x, y + 15.5, 15, 'bold'); });
+  [['Extrusion', fmtDur(st.run)], ['Downtime', fmtDur(st.down)], ['Availability', st.avail == null ? '-' : num1(st.avail * 100) + ' %'], ['Stops', String(st.stops)]]
+    .forEach(([l, v], i) => { const x = M + 5 + i * (W / 4); txt(tr(l).toUpperCase(), x, y + 7, 7, 'bold', C.ink2); txt(v, x, y + 15.5, 15, 'bold'); });
   y += 29;
-  const section = (t, need) => { if (y + (need || 20) > PH - 18) { doc.addPage(); y = 18; } txt(t.toUpperCase(), M, y, 9, 'bold', C.ink); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7; };
+  const section = (t, need) => { if (y + (need || 20) > PH - 18) { doc.addPage(); y = 18; } txt(tr(t).toUpperCase(), M, y, 9, 'bold', C.ink); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7; };
   // timeline
   section('Timeline', 30);
   const span = to - from, X = t => M + (t - from) / span * W;
@@ -2040,8 +2074,8 @@ function drawReport(jsPDF, o, D) {
   txt(hm(to), M + W, y + 13.5, 7, 'normal', C.muted, { align: 'right' });
   y += 18;
   // legend
-  const leg = [{ hex: '#0ca30c', label: runStateOf(P) }].concat(st.causes.map(c => ({ hex: causeHex(c.machine, c.state), label: c.machine + ' · ' + c.state })));
-  if (st.unk >= MIN) leg.push({ hex: '#d5dae0', label: 'Not logged' });
+  const leg = [{ hex: '#0ca30c', label: dn(runStateOf(P)) }].concat(st.causes.map(c => ({ hex: causeHex(c.machine, c.state), label: dn(c.machine) + ' · ' + dn(c.state) })));
+  if (st.unk >= MIN) leg.push({ hex: '#d5dae0', label: tx('Not logged') });
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
   let lx = M;
   for (const l of leg) {
@@ -2064,40 +2098,42 @@ function drawReport(jsPDF, o, D) {
   const startEv = Object.values(R.state).length ? null : null;
   const carried = machines().map(m => { const e = [...D.events, ...Object.values(D.seeds || {})].filter(x => x.machine === m.name && x.at < from).sort(byAt).pop(); return e; }).filter(Boolean);
   const rows = [];
-  for (const e of carried) rows.push([{ t: 'before', mute: true }, { t: e.machine, b: true }, { t: e.state, sw: isRunState(e.machine, e.state, e.run) ? '#0ca30c' : causeHex(e.machine, e.state) }, { t: [e.alarm, e.note].filter(Boolean).join(' · ') + (rows.length === 0 ? '' : ''), mute: true }, { t: e.mode, mute: true }, { t: 'carried in', mute: true }, { t: e.personName || '', mute: true }]);
+  for (const e of carried) rows.push([{ t: 'before', mute: true }, { t: e.machine, b: true }, { t: e.state, sw: isRunState(e.machine, e.state, e.run) ? '#0ca30c' : causeHex(e.machine, e.state) }, { t: [dn(e.alarm), e.note].filter(Boolean).join(' · '), mute: true }, { t: e.mode, mute: true }, { t: 'carried in', mute: true }, { t: e.personName || '', mute: true, keep: true }]);
   for (const e of evs) {
     const run = isRunState(e.machine, e.state, e.run);
     const dur = (next[e.id] || Math.min(Date.now(), to)) - e.at;
-    rows.push([{ t: hm(e.at) }, { t: e.machine, b: true }, { t: e.state + (e.stop && !run ? ' (press stopped)' : ''), sw: run ? '#0ca30c' : causeHex(e.machine, e.state) }, { t: [e.alarm, e.note, e.code].filter(Boolean).join(' · ') }, { t: e.mode }, { t: fmtDur(dur) + (next[e.id] ? '' : '+') }, { t: whoText(e) || (e.example ? 'Example' : '') }]);
+    rows.push([{ t: hm(e.at) }, { t: e.machine, b: true }, { t: e.stop && !run ? tx('{0} (press stopped)', e.state) : e.state, sw: run ? '#0ca30c' : causeHex(e.machine, e.state) }, { t: [dn(e.alarm), e.note, e.code].filter(Boolean).join(' · '), keep: true }, { t: e.mode }, { t: fmtDur(dur) + (next[e.id] ? '' : '+') }, { t: whoText(e) || (e.example ? tx('Example') : ''), keep: true }]);
   }
   if (!rows.length) { txt('Nothing was logged in this period.', M, y + 2, 9, 'normal', C.muted); y += 9; }
-  else y = drawTable(doc, y, [{ h: 'Time', w: 15 }, { h: 'Machine', w: 26 }, { h: 'State', w: 32 }, { h: 'Alarm / notes', w: 49 }, { h: 'Mode', w: 20 }, { h: 'Lasted', w: 18, align: 'right' }, { h: 'Logged by', w: 22 }], rows, ctx);
+  else y = drawTable(doc, y, [{ h: txAt('Time (clock)', 'Time'), w: 15 }, { h: 'Machine', w: 26 }, { h: 'State', w: 32 }, { h: 'Alarm / notes', w: 49 }, { h: 'Mode', w: 20 }, { h: 'Lasted', w: 18, align: 'right' }, { h: txAt('Logged by (column)', 'Logged by'), w: 22 }], rows, ctx);
   y += 6;
   if (y < PH - 30) txt('Lasted is how long the machine stayed in that state. A + means it was still in that state at the end of the report.', M, y, 7, 'normal', C.muted);
   // footer on every page
-  const n = doc.getNumberOfPages(), gen = 'Generated ' + fmtDate(Date.now()) + ' ' + hm(Date.now()) + ' · Extrusion Downtime Log' + (example ? ' · EXAMPLE DATA, NOT REAL' : '');
+  const n = doc.getNumberOfPages(), gen = tx('Generated {0} · Extrusion Downtime Log', fmtDate(Date.now()) + ' ' + hm(Date.now())) + (example ? ' · ' + tx('EXAMPLE DATA, NOT REAL') : '');
   for (let i = 1; i <= n; i++) {
     doc.setPage(i);
     doc.setDrawColor(...C.line); doc.setLineWidth(0.2); doc.line(M, PH - 12, M + W, PH - 12);
     txt(gen, M, PH - 7.5, 7, 'normal', C.muted);
-    txt('Page ' + i + ' of ' + n, M + W, PH - 7.5, 7, 'normal', C.muted, { align: 'right' });
+    txt(tx('Page {0} of {1}', i, n), M + W, PH - 7.5, 7, 'normal', C.muted, { align: 'right' });
     if (example) { try { doc.saveGraphicsState(); doc.setGState(new doc.GState({ opacity: 0.08 })); txt('EXAMPLE DATA', PW / 2, PH / 2, 60, 'bold', C.ink, { align: 'center', angle: 30 }); doc.restoreGraphicsState(); } catch (e) {} }
   }
   void startEv;
   return doc;
 }
+/* the PDF fonts only have Western European letters: swap typographic marks, drop the rest */
+const pdfSafe = v => String(v == null ? '' : v).replace(/[–—]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\u202f|\u00a0/g, ' ').replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff]/g, '?');
 function drawTable(doc, y, cols, rows, ctx) {
   const { M, W, PH, C } = ctx, lh = 4.1;
   const head = () => {
     doc.setFillColor(...C.panel2); doc.rect(M, y, W, 7, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...C.ink2);
-    let x = M; cols.forEach(c => { doc.text(c.h.toUpperCase(), c.align === 'right' ? x + c.w - 2 : x + 2, y + 4.7, { align: c.align === 'right' ? 'right' : 'left' }); x += c.w; });
+    let x = M; cols.forEach(c => { doc.text(pdfSafe(tr(c.h).toUpperCase()), c.align === 'right' ? x + c.w - 2 : x + 2, y + 4.7, { align: c.align === 'right' ? 'right' : 'left' }); x += c.w; });
     y += 7;
   };
   head();
   for (const row of rows) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6);
-    const lines = row.map((cell, i) => doc.splitTextToSize(String(cell.t == null ? '' : cell.t), cols[i].w - 4 - (cell.sw ? 3.4 : 0)));
+    const lines = row.map((cell, i) => doc.splitTextToSize(pdfSafe(cell.t == null ? '' : cell.keep ? String(cell.t) : tr(String(cell.t))), cols[i].w - 4 - (cell.sw ? 3.4 : 0)));
     const nl = Math.max(1, ...lines.map(l => l.length)), rh = nl * lh + 2.6;
     if (y + rh > PH - 16) { doc.addPage(); y = 18; head(); }
     let x = M;
@@ -2119,16 +2155,17 @@ function drawTable(doc, y, cols, rows, ctx) {
    One document per job in 'work'. Maintenance people and admins can read them; people edit their own, admins edit all. */
 const WTYPES = ['Breakdown', 'Preventive', 'Improvement', 'Other'];
 const WSTAT = [['progress', 'In progress'], ['parts', 'Waiting for parts'], ['fixed', 'Fixed']];
-const statLabel = k => (WSTAT.find(x => x[0] === k) || WSTAT[0])[1];
+const statEn = k => (WSTAT.find(x => x[0] === k) || WSTAT[0])[1];
+const statLabel = k => tx(statEn(k));
 const isOpenJob = w => w.status !== 'fixed';
 const WRANGES = [{ id: 'today', label: 'Today' }, { id: '7d', label: '7 days', days: 7 }, { id: '30d', label: '30 days', days: 30 }, { id: 'month', label: 'This month' }, { id: 'lastmonth', label: 'Last month' }, { id: '90d', label: '90 days', days: 90 }];
 function wBounds(id) {
   const now = Date.now(), d = new Date(now);
-  if (id === 'today') { d.setHours(0, 0, 0, 0); return { from: +d, to: now, phrase: 'today' }; }
-  if (id === 'month') return { from: +new Date(d.getFullYear(), d.getMonth(), 1), to: now, phrase: 'this month' };
-  if (id === 'lastmonth') { const a = new Date(d.getFullYear(), d.getMonth() - 1, 1), b = new Date(d.getFullYear(), d.getMonth(), 1); return { from: +a, to: +b - 1, phrase: a.toLocaleDateString('en-CA', { month: 'long', year: 'numeric' }) }; }
+  if (id === 'today') { d.setHours(0, 0, 0, 0); return { from: +d, to: now, phrase: tx('today') }; }
+  if (id === 'month') return { from: +new Date(d.getFullYear(), d.getMonth(), 1), to: now, phrase: tx('this month') };
+  if (id === 'lastmonth') { const a = new Date(d.getFullYear(), d.getMonth() - 1, 1), b = new Date(d.getFullYear(), d.getMonth(), 1); return { from: +a, to: +b - 1, phrase: a.toLocaleDateString(LOC, { month: 'long', year: 'numeric' }) }; }
   const r = WRANGES.find(x => x.id === id) || WRANGES[1];
-  return { from: now - r.days * DAY, to: now, phrase: 'the last ' + r.days + ' days' };
+  return { from: now - r.days * DAY, to: now, phrase: tx('the last {0} days', r.days) };
 }
 function normWork(id, d) {
   if (!d || typeof d.start !== 'number') return null;
@@ -2185,10 +2222,10 @@ function renderMaint() {
   const hrs = done.reduce((t, w) => t + wDur(w), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
   const nType = t => list.filter(w => w.type === t).length;
   const kp = h('div', { class: 'kpis k4' },
-    kpiEl('Jobs', String(list.length), '', open.length ? [open.filter(w => w.status === 'progress').length + ' in progress', open.filter(w => w.status === 'parts').length + ' waiting for parts'].join(' · ') : b.phrase),
+    kpiEl('Jobs', String(list.length), '', open.length ? tx('{0} in progress', open.filter(w => w.status === 'progress').length) + ' · ' + tx('{0} waiting for parts', open.filter(w => w.status === 'parts').length) : b.phrase),
     kpiEl('Time on jobs', fmtH(hrs), 'h', 'fixed jobs'),
-    kpiEl('Breakdowns', String(nType('Breakdown')), '', nType('Preventive') + ' preventive · ' + (nType('Improvement') + nType('Other')) + ' other'),
-    kpiEl('Parts used', String(parts), '', plural(list.filter(w => w.parts.length).length, 'job') + ' with parts'));
+    kpiEl('Breakdowns', String(nType('Breakdown')), '', tx('{0} preventive · {1} other', nType('Preventive'), nType('Improvement') + nType('Other'))),
+    kpiEl('Parts used', String(parts), '', tx('{0} with parts', plural(list.filter(w => w.parts.length).length, 'job'))));
   const openCards = open.map(w => h('article', { class: 'card wcard k-' + w.status, onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
     h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, w.status === 'parts' ? 'parts' : 'warn', statLabel(w.status)); return p; })()),
     h('div', { class: 'wc-b' },
@@ -2198,18 +2235,18 @@ function renderMaint() {
       w.status === 'parts' ? h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'progress', e.currentTarget) }, 'Parts arrived, back to work') : h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'parts', e.currentTarget) }, 'Waiting for parts'),
       h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => openJob(w.id) }, 'Edit')), null) : null));
   const row = w => h('div', { class: 'wrow', role: 'button', tabindex: '0', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); }, onkeydown: keyPress },
-    h('span', { class: 'w-when' }, h('b', null, fmtDate(w.start)), hm(w.start) + '–' + (w.end ? hm(w.end) : 'now')),
+    h('span', { class: 'w-when' }, h('b', null, fmtDate(w.start)), hm(w.start) + '–' + (w.end ? hm(w.end) : tx('now'))),
     h('span', { class: 'w-main' }, h('span', { class: 'w-eq' }, w.equipment, h('span', { class: 'wtype t-' + w.type.toLowerCase() }, w.type)), h('span', { class: 'w-pr' }, w.problem || '—')),
     h('span', { class: 'w-dur' }, fmtDur(wDur(w)), w.parts.length ? h('small', null, plural(w.parts.reduce((a, p) => a + p.qty, 0), 'part')) : null),
-    h('span', { class: 'w-by', title: techNames(w).join(', ') }, techShort(w)),
-    h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': 'PDF for ' + jobNo(w), onclick: e => workPdf([w], { single: true }, e.currentTarget) }, 'PDF'));
+    h('span', { class: 'w-by', title: techNames(w).join(', '), translate: 'no' }, techShort(w)),
+    h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': tx('PDF for {0}', jobNo(w)), onclick: e => workPdf([w], { single: true }, e.currentTarget) }, 'PDF'));
   const days = []; let cur = '';
   for (const w of done) { const d = fmtDay(w.start); if (d !== cur) { cur = d; days.push(h('div', { class: 'dayhead' }, d)); } days.push(row(w)); }
   rc($('#wBody'),
     openCards.length ? h('div', { class: 'mcards' }, openCards) : null,
     kp,
     h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, 'Fixed jobs'), h('span', { class: 'rtag' }, plural(done.length, 'job') + ' · ' + b.phrase))),
-      done.length ? h('div', { class: 'wlist' }, days) : h('p', { class: 'muted' }, S.wwho === 'mine' ? 'You have no fixed jobs in ' + b.phrase + '.' : 'No fixed jobs in ' + b.phrase + '. Press New job to log one.')));
+      done.length ? h('div', { class: 'wlist' }, days) : h('p', { class: 'muted' }, S.wwho === 'mine' ? tx('You have no fixed jobs in {0}.', b.phrase) : tx('No fixed jobs in {0}. Press New job to log one.', b.phrase))));
 }
 
 /* ---------- job form ---------- */
@@ -2222,7 +2259,7 @@ function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
   Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], ro: !!w && !canEditJob(w) });
-  $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : 'New maintenance job · ' + myName();
+  $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : tx('New maintenance job · {0}', myName());
   $('#jbTitle').textContent = w ? w.equipment : 'New job';
   $('#jb-eq').value = w ? w.equipment : '';
   $('#jb-problem').value = w ? w.problem : '';
@@ -2231,7 +2268,7 @@ function openJob(id, finishing) {
   $('#jb-notes').value = w ? w.notes : '';
   $('#jb-start').value = toLocalInput(w ? w.start : Date.now());
   $('#jb-end').value = w && w.end && !finishing ? toLocalInput(w.end) : (finishing ? toLocalInput(Date.now()) : '');
-  rc($('#jbEqList'), equipChoices().map(n => h('option', { value: n })));
+  rc($('#jbEqList'), equipChoices().map(n => h('option', { value: dn(n) })));
   jbErr(''); renderJob();
   $$('#jobForm input, #jobForm textarea').forEach(el => { el.readOnly = JB.ro; });
   if (typeof job.showModal === 'function') { if (!job.open) job.showModal(); } else job.setAttribute('open', '');
@@ -2242,7 +2279,7 @@ function renderJobSoft() { if (JB.id && !S.work.some(w => w.id === JB.id)) close
 function renderJob() {
   const ro = JB.ro, w = JB.id ? S.work.find(x => x.id === JB.id) : null;
   const top = equipChoices().slice(0, 10), cur = $('#jb-eq').value.trim().toLowerCase();
-  rc($('#jbEqChips'), ro ? null : top.map(n => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(cur === n.toLowerCase()), onclick: () => { $('#jb-eq').value = n; renderJob(); } }, n)));
+  rc($('#jbEqChips'), ro ? null : top.map(n => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(cur === n.toLowerCase() || cur === dn(n).toLowerCase()), onclick: () => { $('#jb-eq').value = dn(n); renderJob(); } }, n)));
   const crew = crewChoices(JB.owner), extra = JB.helpers.filter(x => !crew.some(u => u.id === x.uid));
   $('#jbCrewWrap').hidden = !crew.length && !extra.length;
   rc($('#jbCrew'), h('span', { class: 'chip', 'aria-pressed': 'true', 'aria-disabled': 'true', title: 'Logged the job' }, h('i'), JB.ownerName),
@@ -2252,10 +2289,10 @@ function renderJob() {
   $('#jbEndWrap').hidden = JB.status !== 'fixed';
   rc($('#jbType'), WTYPES.map(t => h('button', { type: 'button', class: 'mode', disabled: ro, 'aria-pressed': String(JB.type === t), onclick: () => { JB.type = t; renderJob(); } }, t)));
   rc($('#jbParts'), JB.parts.map((p, i) => h('div', { class: 'prt' },
-      h('input', { type: 'text', value: p.no, maxlength: '40', placeholder: 'Part number', 'aria-label': 'Part number ' + (i + 1), readonly: ro, oninput: e => { p.no = e.target.value; } }),
-      h('input', { type: 'text', value: p.desc, maxlength: '80', placeholder: 'Description', 'aria-label': 'Part description ' + (i + 1), readonly: ro, oninput: e => { p.desc = e.target.value; } }),
-      h('input', { type: 'number', value: String(p.qty), min: '1', step: '1', inputmode: 'numeric', 'aria-label': 'Quantity ' + (i + 1), readonly: ro, oninput: e => { p.qty = Math.max(1, Math.round(+e.target.value || 1)); } }),
-      ro ? null : h('button', { type: 'button', class: 'ibtn danger', 'aria-label': 'Remove part ' + (i + 1), onclick: () => { JB.parts.splice(i, 1); renderJob(); } }, '×'))),
+      h('input', { type: 'text', value: p.no, maxlength: '40', placeholder: 'Part number', 'aria-label': tx('Part number {0}', i + 1), readonly: ro, oninput: e => { p.no = e.target.value; } }),
+      h('input', { type: 'text', value: p.desc, maxlength: '80', placeholder: 'Description', 'aria-label': tx('Part description {0}', i + 1), readonly: ro, oninput: e => { p.desc = e.target.value; } }),
+      h('input', { type: 'number', value: String(p.qty), min: '1', step: '1', inputmode: 'numeric', 'aria-label': tx('Quantity {0}', i + 1), readonly: ro, oninput: e => { p.qty = Math.max(1, Math.round(+e.target.value || 1)); } }),
+      ro ? null : h('button', { type: 'button', class: 'ibtn danger', 'aria-label': tx('Remove part {0}', i + 1), onclick: () => { JB.parts.splice(i, 1); renderJob(); } }, '×'))),
     JB.parts.length ? null : h('p', { class: 'muted', style: 'font-size:.88rem' }, ro ? 'No parts used.' : 'No parts used. Add one if you replaced anything.'));
   $('#jbAddPart').hidden = ro;
   $('#jbEndNow').hidden = ro; $('#jbStartNow').hidden = ro;
@@ -2294,11 +2331,12 @@ function saveJob(e) {
   const now = Date.now(), col = S.db.collection('work');
   if (JB.id) {
     col.doc(JB.id).update(Object.assign(d, { updatedAt: now })).catch(jobWriteFailed);
-    toast(d.equipment + ': ' + statLabel(d.status).toLowerCase());
+    toast(dn(d.equipment) + COLON + statLabel(d.status).toLowerCase());
   } else {
     const ref = col.doc();
     ref.set(Object.assign(d, { uid: myUid(), personName: myName(), createdAt: now, updatedAt: now })).catch(jobWriteFailed);
-    toast((d.status === 'fixed' ? 'Job saved' : d.status === 'parts' ? 'Job saved · waiting for parts' : 'Job started') + (S.online ? '' : ' on this device. It syncs when you are back online.'));
+    const said = tx(d.status === 'fixed' ? 'Job saved' : d.status === 'parts' ? 'Job saved · waiting for parts' : 'Job started');
+    toast(S.online ? said : tx('{0} on this device. It syncs when you are back online.', said));
   }
   closeJob();
 }
@@ -2306,11 +2344,11 @@ function setJobStatus(w, st, btn) {
   if (!S.db || !canEditJob(w)) return;
   if (btn) btn.disabled = true;
   S.db.collection('work').doc(w.id).update({ status: st, end: null, updatedAt: Date.now() }).catch(jobWriteFailed);
-  toast(w.equipment + ': ' + statLabel(st).toLowerCase());
+  toast(dn(w.equipment) + COLON + statLabel(st).toLowerCase());
 }
 function jobWriteFailed(x) {
   if (x && x.code === 'permission-denied') { S.workDenied = true; renderAll(); toast(isSuper() ? "The job wasn't saved: the database rules need updating. See the Maintenance tab." : "The job wasn't saved: the database refused it. Ask the main admin to update the database rules."); }
-  else toast("The job wasn't saved. " + fbMsg(x));
+  else toast(tx("The job wasn't saved. {0}", fbMsg(x)));
 }
 function deleteJob() {
   const b = $('#jbDelete');
@@ -2329,7 +2367,7 @@ async function workPdf(list, o, btn) {
     const doc = drawWork(jsPDF, list, o);
     const name = o.single ? 'maintenance-job-' + jobNo(list[0]).toLowerCase() + '-' + slug(list[0].equipment) + '.pdf' : 'maintenance-report-' + ymd(o.from) + (ymd(o.from) !== ymd(o.to) ? '-to-' + ymd(o.to) : '') + (o.who ? '-' + slug(o.who) : '') + '.pdf';
     saveFile(name, doc.output('blob'));
-    toast(o.single ? 'Work order downloaded' : 'Work orders downloaded · ' + plural(list.length, 'page'));
+    toast(o.single ? tx('Work order downloaded') : tx('Work orders downloaded · {0}', plural(list.length, 'page')));
   } catch (x) {
     if (x && x.code === 'declined') return;
     toast(x && x.message === 'load' ? "Couldn't load the PDF tool. Check the connection and try again." : "Couldn't make the PDF. Try again.");
@@ -2357,7 +2395,7 @@ function drawWork(jsPDF, list, o) {
   const kind = t => t.toUpperCase();
   list.forEach((w, idx) => {
     if (idx > 0) doc.addPage();
-    const techs = techNames(w), status = statLabel(w.status);
+    const techs = techNames(w), status = statEn(w.status);
     // company heading
     if (cname) txt(cname, L - 0.8, 25.5, 56, 'bold', K.logo);
     if (csub) txt(csub.toUpperCase(), L, 33, 16.5, 'bold', K.logo2);
@@ -2591,6 +2629,41 @@ setInterval(() => {
   if (S.conn === 'live' && Date.now() - S.liveSince > 60 * HOUR) subLive();
   renderAll();
 }, 30000);
+
+/* language: the button shows the other language; switching reloads so every screen is drawn in it */
+const langBtn = $('#langBtn');
+langBtn.textContent = LANG === 'fr' ? 'EN' : 'FR';
+langBtn.setAttribute('lang', LANG === 'fr' ? 'en' : 'fr');
+langBtn.setAttribute('aria-label', LANG === 'fr' ? 'English' : 'Français');
+langBtn.title = LANG === 'fr' ? 'Switch to English' : 'Passer en français';
+langBtn.addEventListener('click', () => { LS.set('lang', LANG === 'fr' ? 'en' : 'fr'); location.reload(); });
+
+/* French: translate the screen text as it appears. Whole text pieces only, from the dictionary in js/i18n.js;
+   names people typed are left alone unless they match a default name. Anything inside translate="no" is skipped. */
+if (LANG === 'fr') {
+  const ATTRS = ['placeholder', 'aria-label', 'title', 'data-tip'];
+  const SKIP = '[translate="no"], script, style';
+  const hasWord = v => !!v && /[A-Za-z]/.test(v);
+  const doText = t => { const v = t.nodeValue; if (!hasWord(v) || (t.parentElement && t.parentElement.tagName === 'TEXTAREA')) return; const o = tr(v); if (o !== v) t.nodeValue = o; };
+  const doAttrs = el => { for (const a of ATTRS) { const v = el.getAttribute(a); if (hasWord(v)) { const o = tr(v); if (o !== v) el.setAttribute(a, o); } } };
+  const skipped = n => { const p = n.nodeType === 1 ? n : n.parentElement; return !p || !!p.closest(SKIP); };
+  const walk = root => {
+    if (root.nodeType === 3) { if (!skipped(root)) doText(root); return; }
+    if (root.nodeType !== 1 || skipped(root)) return;
+    doAttrs(root);
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, { acceptNode: n => n.nodeType === 1 && n.matches(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+    let n; while ((n = w.nextNode())) { if (n.nodeType === 3) doText(n); else doAttrs(n); }
+  };
+  walk(document.body);
+  document.title = tr(document.title);
+  new MutationObserver(list => {
+    for (const m of list) {
+      if (m.type === 'childList') m.addedNodes.forEach(walk);
+      else if (m.type === 'characterData') { if (!skipped(m.target)) doText(m.target); }
+      else if (!skipped(m.target)) doAttrs(m.target);
+    }
+  }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRS });
+}
 
 const hash = (location.hash || '').replace('#', '');
 S.tab = TABS.includes(hash) ? hash : LS.get('tab', 'shift');
