@@ -2094,7 +2094,10 @@ function drawTable(doc, y, cols, rows, ctx) {
 /* ================= MAINTENANCE: job log for the maintenance team =================
    Any equipment or place, not only the line: final saw, crane, forklift, preventive work.
    One document per job in 'work'. Maintenance people and admins can read them; people edit their own, admins edit all. */
-const WTYPES = ['Corrective', 'Preventive', 'Improvement', 'Other'];
+const WTYPES = ['Breakdown', 'Preventive', 'Improvement', 'Other'];
+const WSTAT = [['progress', 'In progress'], ['parts', 'Waiting for parts'], ['fixed', 'Fixed']];
+const statLabel = k => (WSTAT.find(x => x[0] === k) || WSTAT[0])[1];
+const isOpenJob = w => w.status !== 'fixed';
 const WRANGES = [{ id: 'today', label: 'Today' }, { id: '7d', label: '7 days', days: 7 }, { id: '30d', label: '30 days', days: 30 }, { id: 'month', label: 'This month' }, { id: 'lastmonth', label: 'Last month' }, { id: '90d', label: '90 days', days: 90 }];
 function wBounds(id) {
   const now = Date.now(), d = new Date(now);
@@ -2109,7 +2112,8 @@ function normWork(id, d) {
   const str = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
   const parts = Array.isArray(d.parts) ? d.parts.filter(p => p && (p.no || p.desc)).slice(0, 40).map(p => ({ no: str(p.no, 40), desc: str(p.desc, 80), qty: typeof p.qty === 'number' && p.qty > 0 ? p.qty : 1 })) : [];
   const helpers = Array.isArray(d.helpers) ? d.helpers.filter(x => x && typeof x.name === 'string' && x.name.trim()).slice(0, 8).map(x => ({ uid: str(x.uid, 128), name: str(x.name, 60) })) : [];
-  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Breakdown' ? 'Corrective' : WTYPES.includes(d.type) ? d.type : 'Other',
+  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Corrective' ? 'Breakdown' : WTYPES.includes(d.type) ? d.type : 'Other',
+    status: d.status === 'fixed' && typeof d.end === 'number' ? 'fixed' : d.status === 'parts' ? 'parts' : (typeof d.end === 'number' && !d.status ? 'fixed' : 'progress'),
     problem: str(d.problem, 2000), diagnosis: str(d.diagnosis, 2000), solution: str(d.solution, 2000), notes: str(d.notes, 1000), parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
     createdAt: typeof d.createdAt === 'number' ? d.createdAt : d.start, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0 };
 }
@@ -2130,12 +2134,12 @@ const techShort = w => { const t = techNames(w); return t[0] + (t.length > 1 ? '
 const canEditJob = w => !!w && (isAdmin() || (isMaint() && w.uid === myUid()));
 function wList() {
   const b = wBounds(S.wrange), mine = S.wwho === 'mine';
-  return S.work.filter(w => (w.end == null || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.helpers.some(x => x.uid === myUid()))).sort((a, c) => (c.end == null) - (a.end == null) || c.start - a.start);
+  return S.work.filter(w => (isOpenJob(w) || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.helpers.some(x => x.uid === myUid()))).sort((a, c) => isOpenJob(c) - isOpenJob(a) || c.start - a.start);
 }
 function renderMaint() {
   buildSeg('wRange', WRANGES, S.wrange, v => { S.wrange = v; LS.set('wrange', v); renderMaint(); });
   buildSeg('wWho', [{ id: 'all', label: 'Everyone' }, { id: 'mine', label: 'Mine' }], S.wwho, v => { S.wwho = v; LS.set('wwho', v); renderMaint(); });
-  const b = wBounds(S.wrange), list = wList(), open = list.filter(w => w.end == null), done = list.filter(w => w.end != null);
+  const b = wBounds(S.wrange), list = wList(), open = list.filter(isOpenJob), done = list.filter(w => !isOpenJob(w));
   $('#wPdf').disabled = !done.length && !open.length;
   $('#wNew').disabled = !!S.workDenied;
   if (S.workDenied) {
@@ -2158,15 +2162,18 @@ function renderMaint() {
   const hrs = done.reduce((t, w) => t + wDur(w), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
   const nType = t => list.filter(w => w.type === t).length;
   const kp = h('div', { class: 'kpis k4' },
-    kpiEl('Jobs', String(list.length), '', open.length ? open.length + ' in progress' : b.phrase),
-    kpiEl('Time on jobs', fmtH(hrs), 'h', 'finished jobs'),
-    kpiEl('Corrective', String(nType('Corrective')), '', nType('Preventive') + ' preventive · ' + (nType('Improvement') + nType('Other')) + ' other'),
-    kpiEl('Parts used', String(parts), '', list.filter(w => w.parts.length).length + ' jobs with parts'));
-  const openCards = open.map(w => h('article', { class: 'card wcard k-open', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
-    h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, 'warn', 'In progress'); return p; })()),
+    kpiEl('Jobs', String(list.length), '', open.length ? [open.filter(w => w.status === 'progress').length + ' in progress', open.filter(w => w.status === 'parts').length + ' waiting for parts'].join(' · ') : b.phrase),
+    kpiEl('Time on jobs', fmtH(hrs), 'h', 'fixed jobs'),
+    kpiEl('Breakdowns', String(nType('Breakdown')), '', nType('Preventive') + ' preventive · ' + (nType('Improvement') + nType('Other')) + ' other'),
+    kpiEl('Parts used', String(parts), '', plural(list.filter(w => w.parts.length).length, 'job') + ' with parts'));
+  const openCards = open.map(w => h('article', { class: 'card wcard k-' + w.status, onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
+    h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, w.status === 'parts' ? 'parts' : 'warn', statLabel(w.status)); return p; })()),
     h('div', { class: 'wc-b' },
       h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', techNames(w).length > 1 ? 'Technicians' : 'Technician', techNames(w).join(', ')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', fmtDur(wDur(w))))),
-    canEditJob(w) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' }, h('button', { type: 'button', class: 'btn btn-go', onclick: () => openJob(w.id, true) }, 'Finish job'), h('button', { type: 'button', class: 'btn', onclick: () => openJob(w.id) }, 'Edit')), null) : null));
+    canEditJob(w) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
+      h('button', { type: 'button', class: 'btn btn-go', onclick: () => openJob(w.id, true) }, 'Fixed'),
+      w.status === 'parts' ? h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'progress', e.currentTarget) }, 'Parts arrived, back to work') : h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'parts', e.currentTarget) }, 'Waiting for parts'),
+      h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => openJob(w.id) }, 'Edit')), null) : null));
   const row = w => h('div', { class: 'wrow', role: 'button', tabindex: '0', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); }, onkeydown: keyPress },
     h('span', { class: 'w-when' }, h('b', null, fmtDate(w.start)), hm(w.start) + '–' + (w.end ? hm(w.end) : 'now')),
     h('span', { class: 'w-main' }, h('span', { class: 'w-eq' }, w.equipment, h('span', { class: 'wtype t-' + w.type.toLowerCase() }, w.type)), h('span', { class: 'w-pr' }, w.problem || '—')),
@@ -2178,20 +2185,20 @@ function renderMaint() {
   rc($('#wBody'),
     openCards.length ? h('div', { class: 'mcards' }, openCards) : null,
     kp,
-    h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, 'Finished jobs'), h('span', { class: 'rtag' }, plural(done.length, 'job') + ' · ' + b.phrase))),
-      done.length ? h('div', { class: 'wlist' }, days) : h('p', { class: 'muted' }, S.wwho === 'mine' ? 'You have no finished jobs in ' + b.phrase + '.' : 'No finished jobs in ' + b.phrase + '. Press New job to log one.')));
+    h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, 'Fixed jobs'), h('span', { class: 'rtag' }, plural(done.length, 'job') + ' · ' + b.phrase))),
+      done.length ? h('div', { class: 'wlist' }, days) : h('p', { class: 'muted' }, S.wwho === 'mine' ? 'You have no fixed jobs in ' + b.phrase + '.' : 'No fixed jobs in ' + b.phrase + '. Press New job to log one.')));
 }
 
 /* ---------- job form ---------- */
 const job = $('#job');
-const JB = { id: null, type: 'Corrective', parts: [], helpers: [], ro: false };
+const JB = { id: null, status: 'progress', type: 'Breakdown', parts: [], helpers: [], ro: false };
 function crewChoices(ownerUid) { return S.users.filter(u => u.status === 'active' && u.id !== ownerUid && (u.team === 'maintenance' || u.role === 'admin')).sort((a, c) => a.name.localeCompare(c.name)); }
 function jbErr(m) { const e = $('#jbErr'); e.textContent = m || ''; e.hidden = !m; }
 function equipChoices() { return uniqBy(machines().map(m => m.name).concat(S.config.equipment || [], S.work.map(w => w.equipment)), x => x.toLowerCase()).filter(Boolean); }
 function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
-  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), type: w ? w.type : 'Corrective', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], ro: !!w && !canEditJob(w) });
+  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], ro: !!w && !canEditJob(w) });
   $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : 'New maintenance job · ' + myName();
   $('#jbTitle').textContent = w ? w.equipment : 'New job';
   $('#jb-eq').value = w ? w.equipment : '';
@@ -2200,7 +2207,7 @@ function openJob(id, finishing) {
   $('#jb-diag').value = w ? w.diagnosis : '';
   $('#jb-notes').value = w ? w.notes : '';
   $('#jb-start').value = toLocalInput(w ? w.start : Date.now());
-  $('#jb-end').value = w && w.end ? toLocalInput(w.end) : (finishing ? toLocalInput(Date.now()) : '');
+  $('#jb-end').value = w && w.end && !finishing ? toLocalInput(w.end) : (finishing ? toLocalInput(Date.now()) : '');
   rc($('#jbEqList'), equipChoices().map(n => h('option', { value: n })));
   jbErr(''); renderJob();
   $$('#jobForm input, #jobForm textarea').forEach(el => { el.readOnly = JB.ro; });
@@ -2218,6 +2225,8 @@ function renderJob() {
   rc($('#jbCrew'), h('span', { class: 'chip', 'aria-pressed': 'true', 'aria-disabled': 'true', title: 'Logged the job' }, h('i'), JB.ownerName),
     crew.map(u => { const on = JB.helpers.some(x => x.uid === u.id); return h('button', { type: 'button', class: 'chip', disabled: ro, 'aria-pressed': String(on), onclick: () => { if (on) JB.helpers = JB.helpers.filter(x => x.uid !== u.id); else JB.helpers.push({ uid: u.id, name: u.name }); renderJob(); } }, h('i'), u.name); }),
     extra.map(x => h('span', { class: 'chip', 'aria-pressed': 'true' }, h('i'), x.name)));
+  rc($('#jbStatus'), WSTAT.map(([k, l]) => h('button', { type: 'button', class: 'mode st-' + k, disabled: ro, 'aria-pressed': String(JB.status === k), onclick: () => setFormStatus(k) }, l)));
+  $('#jbEndWrap').hidden = JB.status !== 'fixed';
   rc($('#jbType'), WTYPES.map(t => h('button', { type: 'button', class: 'mode', disabled: ro, 'aria-pressed': String(JB.type === t), onclick: () => { JB.type = t; renderJob(); } }, t)));
   rc($('#jbParts'), JB.parts.map((p, i) => h('div', { class: 'prt' },
       h('input', { type: 'text', value: p.no, maxlength: '40', placeholder: 'Part number', 'aria-label': 'Part number ' + (i + 1), readonly: ro, oninput: e => { p.no = e.target.value; } }),
@@ -2227,28 +2236,33 @@ function renderJob() {
     JB.parts.length ? null : h('p', { class: 'muted', style: 'font-size:.88rem' }, ro ? 'No parts used.' : 'No parts used. Add one if you replaced anything.'));
   $('#jbAddPart').hidden = ro;
   $('#jbEndNow').hidden = ro; $('#jbStartNow').hidden = ro;
-  const status = $('#jb-end').value ? 'Finished' : 'Still working';
-  $('#jbEndHint').textContent = ro ? '' : $('#jb-end').value ? '' : 'Leave empty while you are still working on it.';
+  $('#jbEndHint').textContent = '';
   $('#jbDelete').hidden = !w || ro;
   $('#jbPdf').hidden = !w;
   $('#jbSave').hidden = ro;
-  $('#jbSave').textContent = JB.id ? 'Save' : ($('#jb-end').value ? 'Save job' : 'Start job');
-  void status;
+  $('#jbSave').textContent = JB.id ? 'Save' : (JB.status === 'fixed' ? 'Save job' : 'Start job');
+}
+function setFormStatus(k) {
+  JB.status = k;
+  if (k === 'fixed') { if (!$('#jb-end').value) $('#jb-end').value = toLocalInput(Date.now()); }
+  else $('#jb-end').value = '';
+  jbErr(''); renderJob();
+  if (k === 'fixed' && !$('#jb-fix').value.trim()) $('#jb-fix').focus();
 }
 function addPart() { JB.parts.push({ no: '', desc: '', qty: 1 }); renderJob(); const r = $$('#jbParts .prt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus(); }
 function jobFromForm() {
   const eq = $('#jb-eq').value.trim(), problem = $('#jb-problem').value.trim(), solution = $('#jb-fix').value.trim(), diagnosis = $('#jb-diag').value.trim(), notes = $('#jb-notes').value.trim();
-  const start = fromLocalInput($('#jb-start').value), endV = $('#jb-end').value, end = endV ? fromLocalInput(endV) : null;
+  const status = JB.status, start = fromLocalInput($('#jb-start').value), endV = status === 'fixed' ? $('#jb-end').value : '', end = endV ? fromLocalInput(endV) : null;
   if (!eq) throw 'Enter the equipment or place you worked on.';
   if (!problem) throw 'Describe the problem or the task.';
   if (!start) throw 'Enter when the job started.';
   if (start > Date.now() + 5 * MIN) throw 'The start time is in the future.';
-  if (endV && !end) throw 'Enter a valid finish time, or leave it empty.';
+  if (status === 'fixed' && !end) throw 'Enter when the job was fixed.';
   if (end != null && end < start) throw 'The finish time must be after the start time.';
   if (end != null && end > Date.now() + 5 * MIN) throw 'The finish time is in the future.';
-  if (end != null && !solution) throw 'Describe the work done or the fix before finishing the job.';
+  if (status === 'fixed' && !solution) throw 'Describe the solution before marking the job fixed.';
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
-  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), start, end };
+  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end };
 }
 function saveJob(e) {
   e.preventDefault(); jbErr('');
@@ -2257,13 +2271,19 @@ function saveJob(e) {
   const now = Date.now(), col = S.db.collection('work');
   if (JB.id) {
     col.doc(JB.id).update(Object.assign(d, { updatedAt: now })).catch(jobWriteFailed);
-    toast(d.end ? 'Job saved' : 'Job updated');
+    toast(d.equipment + ': ' + statLabel(d.status).toLowerCase());
   } else {
     const ref = col.doc();
     ref.set(Object.assign(d, { uid: myUid(), personName: myName(), createdAt: now, updatedAt: now })).catch(jobWriteFailed);
-    toast((d.end ? 'Job saved' : 'Job started') + (S.online ? '' : ' on this device. It syncs when you are back online.'));
+    toast((d.status === 'fixed' ? 'Job saved' : d.status === 'parts' ? 'Job saved · waiting for parts' : 'Job started') + (S.online ? '' : ' on this device. It syncs when you are back online.'));
   }
   closeJob();
+}
+function setJobStatus(w, st, btn) {
+  if (!S.db || !canEditJob(w)) return;
+  if (btn) btn.disabled = true;
+  S.db.collection('work').doc(w.id).update({ status: st, end: null, updatedAt: Date.now() }).catch(jobWriteFailed);
+  toast(w.equipment + ': ' + statLabel(st).toLowerCase());
 }
 function jobWriteFailed(x) {
   if (x && x.code === 'permission-denied') { S.workDenied = true; renderAll(); toast(isSuper() ? "The job wasn't saved: the database rules need updating. See the Maintenance tab." : "The job wasn't saved: the database refused it. Ask the main admin to update the database rules."); }
@@ -2314,7 +2334,7 @@ function drawWork(jsPDF, list, o) {
   const kind = t => t.toUpperCase();
   list.forEach((w, idx) => {
     if (idx > 0) doc.addPage();
-    const techs = techNames(w), status = w.end ? 'Finished' : 'In progress';
+    const techs = techNames(w), status = statLabel(w.status);
     // company heading
     if (cname) txt(cname, L - 0.8, 25.5, 56, 'bold', K.logo);
     if (csub) txt(csub.toUpperCase(), L, 33, 16.5, 'bold', K.logo2);
@@ -2377,7 +2397,7 @@ function drawWork(jsPDF, list, o) {
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
     });
     y += 16;
-    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.end ? date(w.end) : ''], [L + 117, 34, 'Duration', w.end ? hms(wDur(w)) : ''], [L + 159, 34, 'Breakdown Time', w.type === 'Corrective' && w.end ? hms(wDur(w)) : '']];
+    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.status === 'fixed' ? date(w.end) : ''], [L + 117, 34, 'Duration', w.status === 'fixed' ? hms(wDur(w)) : ''], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && w.status === 'fixed' ? hms(wDur(w)) : '']];
     c4.forEach(([x, wd, l, v]) => {
       if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
@@ -2424,8 +2444,7 @@ $('#jbAddPart').addEventListener('click', addPart);
 $('#jbDelete').addEventListener('click', deleteJob);
 $('#jbPdf').addEventListener('click', e => { const w = S.work.find(x => x.id === JB.id); if (w) workPdf([w], { single: true }, e.currentTarget); });
 $('#jbStartNow').addEventListener('click', () => { $('#jb-start').value = toLocalInput(Date.now()); });
-$('#jbEndNow').addEventListener('click', () => { $('#jb-end').value = toLocalInput(Date.now()); renderJob(); });
-$('#jb-end').addEventListener('input', () => renderJob());
+$('#jbEndNow').addEventListener('click', () => { $('#jb-end').value = toLocalInput(Date.now()); });
 $('#jb-eq').addEventListener('input', () => renderJob());
 job.addEventListener('click', e => { if (e.target === job) closeJob(); });
 $('#wNew').addEventListener('click', () => openJob(null));

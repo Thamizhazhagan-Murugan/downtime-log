@@ -287,9 +287,10 @@
         </div>
         <div class="sh-sec" id="jbCrewWrap"><p class="lbl">Technicians</p><div class="chips crew" id="jbCrew"></div></div>
         <div class="sh-sec"><p class="lbl">Type of work</p><div class="modes" id="jbType"></div></div>
+        <div class="sh-sec"><p class="lbl">Status</p><div class="modes three" id="jbStatus"></div></div>
         <div class="row2 jtimes">
           <div class="field"><div class="sh-row"><label for="jb-start">Start</label><button type="button" class="linkbtn" id="jbStartNow">Now</button></div><input id="jb-start" type="datetime-local"></div>
-          <div class="field"><div class="sh-row"><label for="jb-end">Finish</label><button type="button" class="linkbtn" id="jbEndNow">Now</button></div><input id="jb-end" type="datetime-local"><small class="muted" id="jbEndHint"></small></div>
+          <div class="field" id="jbEndWrap"><div class="sh-row"><label for="jb-end">Fixed at</label><button type="button" class="linkbtn" id="jbEndNow">Now</button></div><input id="jb-end" type="datetime-local"><small class="muted" id="jbEndHint"></small></div>
         </div>
       </div>
       <div class="jcol">
@@ -302,11 +303,10 @@
           <div class="prts" id="jbParts"></div>
         </div>
       </div>
-      <p id="jbErr" class="form-err" role="alert" hidden></p>
     </div>
     <div class="sh-foot dlg-actions">
       <button type="button" id="jbDelete" class="btn btn-danger">Delete</button>
-      <span class="sp"></span>
+      <span class="sp"><span id="jbErr" class="form-err foot-err" role="alert" hidden></span></span>
       <button type="button" id="jbPdf" class="btn">PDF</button>
       <button type="submit" id="jbSave" class="btn btn-primary">Start job</button>
     </div>

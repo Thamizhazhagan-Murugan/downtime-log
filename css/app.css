@@ -707,7 +707,7 @@ details.howto[open] summary{margin-bottom:12px}
 .w-dur small{font-weight:400;color:var(--muted);font-size:.78rem}
 .w-by{font-size:.84rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wtype{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font:600 .72rem/1 var(--f-body);background:var(--panel-2);color:var(--ink-2)}
-.wtype.t-corrective{background:var(--down-soft);color:var(--down-ink)}
+.wtype.t-breakdown{background:var(--down-soft);color:var(--down-ink)}
 .wtype.t-preventive{background:var(--run-soft);color:var(--run)}
 .wtype.t-improvement{background:color-mix(in oklab,var(--s1) 14%,transparent);color:var(--s1)}
 @media (max-width:720px){
@@ -765,3 +765,19 @@ input[type="datetime-local"],input[type="time"]{min-width:0;max-width:100%}
 .rules-steps{display:grid;gap:10px;color:var(--ink-2);max-width:70ch}
 .rules-steps ol{margin:0;padding-left:1.3rem;display:grid;gap:6px}
 .rules-steps a{color:var(--link);font-weight:600}
+/* job status */
+.modes.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:480px){.modes.three{grid-template-columns:repeat(3,minmax(0,1fr));border-radius:999px}.modes.three .mode{border-radius:999px;font-size:.8rem;padding:0 4px}}
+.mode.st-progress[aria-pressed="true"]{background:var(--warn);color:#2b2100}
+.mode.st-parts[aria-pressed="true"]{background:#ef7d1a;color:#fff}
+.mode.st-fixed[aria-pressed="true"]{background:var(--run);color:#fff}
+.spill.k-parts{background:#ef7d1a;color:#fff}
+.wcard.k-parts{box-shadow:inset 0 0 0 2px #ef7d1a,var(--shadow)}
+@media (min-width:760px){
+  #job .jtimes{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+  #job .jtimes input{font-size:.86rem;padding:8px 8px;min-height:40px}
+}
+.foot-err{display:block;padding:7px 10px;font-size:.84rem;line-height:1.3}
+#job .dlg-actions .sp{min-width:0;display:flex}
+#job .dlg-actions{flex-wrap:nowrap}
+@media (max-width:759px){#job .dlg-actions{flex-wrap:wrap}#job .dlg-actions .sp{flex:1 1 100%;order:-1}#job .dlg-actions .sp:has(.foot-err[hidden]){display:none}}
