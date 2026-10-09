@@ -746,3 +746,16 @@ input[type="datetime-local"],input[type="time"]{min-width:0;max-width:100%}
 }
 .jtimes{grid-template-columns:minmax(0,1fr)}
 @media (min-width:560px) and (max-width:859px){.jtimes{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.chips.crew .chip{height:34px;font-size:.84rem;padding:0 12px 0 10px}
+.chips.crew .chip i{background:var(--link)}
+.chips.crew .chip[aria-disabled="true"]{cursor:default}
+@media (min-width:860px){
+  #job .sh-head{padding:18px 22px 6px}
+  #job .sh-body{gap:14px 26px;padding-bottom:14px}
+  #job .jcol{gap:14px}
+  #job .sh-sec{gap:8px}
+  #job .job-body textarea{min-height:78px}
+  #job .chips .chip{height:32px}
+  #job .modes .mode{height:36px}
+  #job .sh-foot{padding:10px 22px 16px}
+}

@@ -638,7 +638,7 @@ async function recheckVerified() {
   try { await S.fbUser.reload(); await S.fbUser.getIdToken(true); onAuth(S.auth.currentUser); } catch (x) { G.err = authMsg(x); }
   G.busy = false; if (S.fbUser && !S.fbUser.emailVerified) { G.err = 'Not verified yet. Open the link in the email, then try again.'; } renderGate();
 }
-async function signOut() { closeAcct(); try { await S.auth.signOut(); } catch (e) {} }
+async function signOut() { closeAcct(); G.pendingName = ''; try { await S.auth.signOut(); } catch (e) {} }
 
 function onAuth(u) {
   stopData();
@@ -661,6 +661,7 @@ async function ensureProfile(ref) {
   if (S.creatingMe) return; S.creatingMe = true;
   const u = S.fbUser, sup = isSuper();
   const doc = { name: (G.pendingName || u.displayName || String(u.email || '').split('@')[0] || 'New user').slice(0, 60), email: String(u.email || '').toLowerCase(), role: sup ? 'admin' : 'user', team: 'operator', status: sup ? 'active' : 'pending', createdAt: Date.now(), photo: u.photoURL || '' };
+  G.pendingName = '';
   try { await ref.set(doc); } catch (x) { G.err = "Couldn't create your profile. " + fbMsg(x); S.meLoaded = true; renderAll(); }
   S.creatingMe = false;
 }
@@ -2101,7 +2102,8 @@ function normWork(id, d) {
   if (!d || typeof d.start !== 'number') return null;
   const str = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
   const parts = Array.isArray(d.parts) ? d.parts.filter(p => p && (p.no || p.desc)).slice(0, 40).map(p => ({ no: str(p.no, 40), desc: str(p.desc, 80), qty: typeof p.qty === 'number' && p.qty > 0 ? p.qty : 1 })) : [];
-  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), equipment: str(d.equipment, 60) || 'Not set', type: WTYPES.includes(d.type) ? d.type : 'Other',
+  const helpers = Array.isArray(d.helpers) ? d.helpers.filter(x => x && typeof x.name === 'string' && x.name.trim()).slice(0, 8).map(x => ({ uid: str(x.uid, 128), name: str(x.name, 60) })) : [];
+  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, equipment: str(d.equipment, 60) || 'Not set', type: WTYPES.includes(d.type) ? d.type : 'Other',
     problem: str(d.problem, 2000), solution: str(d.solution, 2000), parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
     createdAt: typeof d.createdAt === 'number' ? d.createdAt : d.start, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0 };
 }
@@ -2117,10 +2119,12 @@ function subWork(on) {
 }
 const jobNo = w => 'WO-' + ymd(w.start).replace(/-/g, '').slice(2) + '-' + w.id.slice(0, 4).toUpperCase();
 const wDur = w => (w.end || Date.now()) - w.start;
+const techNames = w => [w.personName || nameOf(w.uid)].concat(w.helpers.map(x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name)));
+const techShort = w => { const t = techNames(w); return t[0] + (t.length > 1 ? ' +' + (t.length - 1) : ''); };
 const canEditJob = w => !!w && (isAdmin() || (isMaint() && w.uid === myUid()));
 function wList() {
   const b = wBounds(S.wrange), mine = S.wwho === 'mine';
-  return S.work.filter(w => (w.end == null || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid())).sort((a, c) => (c.end == null) - (a.end == null) || c.start - a.start);
+  return S.work.filter(w => (w.end == null || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.helpers.some(x => x.uid === myUid()))).sort((a, c) => (c.end == null) - (a.end == null) || c.start - a.start);
 }
 function renderMaint() {
   buildSeg('wRange', WRANGES, S.wrange, v => { S.wrange = v; LS.set('wrange', v); renderMaint(); });
@@ -2138,13 +2142,13 @@ function renderMaint() {
   const openCards = open.map(w => h('article', { class: 'card wcard k-open', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
     h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, 'warn', 'In progress'); return p; })()),
     h('div', { class: 'wc-b' },
-      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', 'Technician', w.personName || nameOf(w.uid)), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', fmtDur(wDur(w))))),
+      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', techNames(w).length > 1 ? 'Technicians' : 'Technician', techNames(w).join(', ')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', fmtDur(wDur(w))))),
     canEditJob(w) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' }, h('button', { type: 'button', class: 'btn btn-go', onclick: () => openJob(w.id, true) }, 'Finish job'), h('button', { type: 'button', class: 'btn', onclick: () => openJob(w.id) }, 'Edit')), null) : null));
   const row = w => h('div', { class: 'wrow', role: 'button', tabindex: '0', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); }, onkeydown: keyPress },
     h('span', { class: 'w-when' }, h('b', null, fmtDate(w.start)), hm(w.start) + '–' + (w.end ? hm(w.end) : 'now')),
     h('span', { class: 'w-main' }, h('span', { class: 'w-eq' }, w.equipment, h('span', { class: 'wtype t-' + w.type.toLowerCase() }, w.type)), h('span', { class: 'w-pr' }, w.problem || '—')),
     h('span', { class: 'w-dur' }, fmtDur(wDur(w)), w.parts.length ? h('small', null, plural(w.parts.reduce((a, p) => a + p.qty, 0), 'part')) : null),
-    h('span', { class: 'w-by' }, w.personName || nameOf(w.uid)),
+    h('span', { class: 'w-by', title: techNames(w).join(', ') }, techShort(w)),
     h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': 'PDF for ' + jobNo(w), onclick: e => workPdf([w], { single: true }, e.currentTarget) }, 'PDF'));
   const days = []; let cur = '';
   for (const w of done) { const d = fmtDay(w.start); if (d !== cur) { cur = d; days.push(h('div', { class: 'dayhead' }, d)); } days.push(row(w)); }
@@ -2157,13 +2161,14 @@ function renderMaint() {
 
 /* ---------- job form ---------- */
 const job = $('#job');
-const JB = { id: null, type: 'Breakdown', parts: [], ro: false };
+const JB = { id: null, type: 'Breakdown', parts: [], helpers: [], ro: false };
+function crewChoices(ownerUid) { return S.users.filter(u => u.status === 'active' && u.id !== ownerUid && (u.team === 'maintenance' || u.role === 'admin')).sort((a, c) => a.name.localeCompare(c.name)); }
 function jbErr(m) { const e = $('#jbErr'); e.textContent = m || ''; e.hidden = !m; }
 function equipChoices() { return uniqBy(machines().map(m => m.name).concat(S.config.equipment || [], S.work.map(w => w.equipment)), x => x.toLowerCase()).filter(Boolean); }
 function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
-  Object.assign(JB, { id: w ? w.id : null, type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], ro: !!w && !canEditJob(w) });
+  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], ro: !!w && !canEditJob(w) });
   $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : 'New maintenance job · ' + myName();
   $('#jbTitle').textContent = w ? w.equipment : 'New job';
   $('#jb-eq').value = w ? w.equipment : '';
@@ -2183,6 +2188,11 @@ function renderJob() {
   const ro = JB.ro, w = JB.id ? S.work.find(x => x.id === JB.id) : null;
   const top = equipChoices().slice(0, 10), cur = $('#jb-eq').value.trim().toLowerCase();
   rc($('#jbEqChips'), ro ? null : top.map(n => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(cur === n.toLowerCase()), onclick: () => { $('#jb-eq').value = n; renderJob(); } }, n)));
+  const crew = crewChoices(JB.owner), extra = JB.helpers.filter(x => !crew.some(u => u.id === x.uid));
+  $('#jbCrewWrap').hidden = !crew.length && !extra.length;
+  rc($('#jbCrew'), h('span', { class: 'chip', 'aria-pressed': 'true', 'aria-disabled': 'true', title: 'Logged the job' }, h('i'), JB.ownerName),
+    crew.map(u => { const on = JB.helpers.some(x => x.uid === u.id); return h('button', { type: 'button', class: 'chip', disabled: ro, 'aria-pressed': String(on), onclick: () => { if (on) JB.helpers = JB.helpers.filter(x => x.uid !== u.id); else JB.helpers.push({ uid: u.id, name: u.name }); renderJob(); } }, h('i'), u.name); }),
+    extra.map(x => h('span', { class: 'chip', 'aria-pressed': 'true' }, h('i'), x.name)));
   rc($('#jbType'), WTYPES.map(t => h('button', { type: 'button', class: 'mode', disabled: ro, 'aria-pressed': String(JB.type === t), onclick: () => { JB.type = t; renderJob(); } }, t)));
   rc($('#jbParts'), JB.parts.map((p, i) => h('div', { class: 'prt' },
       h('input', { type: 'text', value: p.no, maxlength: '40', placeholder: 'Part number', 'aria-label': 'Part number ' + (i + 1), readonly: ro, oninput: e => { p.no = e.target.value; } }),
@@ -2213,7 +2223,7 @@ function jobFromForm() {
   if (end != null && end > Date.now() + 5 * MIN) throw 'The finish time is in the future.';
   if (end != null && !solution) throw 'Describe the work done or the fix before finishing the job.';
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
-  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), solution: solution.slice(0, 2000), parts, start, end };
+  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), solution: solution.slice(0, 2000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), start, end };
 }
 function saveJob(e) {
   e.preventDefault(); jbErr('');
@@ -2258,83 +2268,117 @@ function reportWork(btn) {
   workPdf(list, { from: b.from, to: b.to, phrase: b.phrase, who: S.wwho === 'mine' ? myName() : '' }, btn);
 }
 function drawWork(jsPDF, list, o) {
+  /* Laid out like a paper work order: heading, a dark band with the type, two blocks of fields,
+     Comments (the problem), Solution, Parts used, Notes, then Work completed with type, technicians, status
+     and the signature / date / duration / breakdown time line. */
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const PW = 210, PH = 297, M = 16, W = PW - 2 * M;
-  const C = { ink: [21, 23, 28], ink2: [65, 69, 78], muted: [115, 120, 132], line: [227, 229, 233], panel2: [243, 244, 246], side: [27, 28, 32], sideInk: [241, 242, 244], sideMuted: [138, 142, 151], brand: [229, 57, 47], run: [34, 164, 71], warn: [242, 194, 27] };
-  const ctx = { M, W, PH, C };
+  const PW = 210, PH = 297, M = 14, W = PW - 2 * M;
+  const C = { ink: [20, 20, 20], ink2: [60, 60, 60], muted: [110, 110, 110], line: [150, 150, 150], hair: [210, 210, 210], bar: [58, 58, 58], bar2: [92, 92, 92], fill: [242, 242, 242], run: [24, 128, 56], warn: [150, 105, 0] };
+  const ctx = { M, W, PH, C: { ink: C.ink, ink2: C.ink2, muted: C.muted, line: C.hair, panel2: C.fill } };
   const clean = v => String(v == null ? '' : v).replace(/[–—]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff]/g, '?');
   const txt = (t, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || C.ink)); doc.text(clean(t), x, y, opt || {}); };
-  doc.setLineHeightFactor(1.35);
-  const band = (kicker, title, right1, right2) => {
-    doc.setFillColor(...C.side); doc.rect(0, 0, PW, 34, 'F');
-    doc.setFillColor(...C.brand); doc.roundedRect(M, 10, 8, 8, 2, 2, 'F');
-    doc.setDrawColor(255, 255, 255); doc.setLineWidth(0.6); doc.setLineCap('round'); doc.setLineJoin('round');
-    doc.lines([[1.5, 0], [0.9, -2.6], [1.3, 3.6], [0.9, -2], [1.4, 0]], M + 1.1, 14.6, [1, 1], 'S', false);
-    txt(kicker, M + 12, 15.5, 8, 'bold', C.sideMuted);
-    txt(doc.splitTextToSize(clean(title), W - 70)[0], M, 27, 19, 'bold', C.sideInk);
-    if (right1) txt(right1, PW - M, 16, 10, 'bold', C.sideInk, { align: 'right' });
-    if (right2) txt(right2, PW - M, 23, 9, 'normal', C.sideMuted, { align: 'right' });
+  const dt = t => { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear() + '  ' + hm(t); };
+  const day = t => { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear(); };
+  doc.setLineHeightFactor(1.3);
+  const header = (boxTitle, boxValue) => {
+    txt('MAINTENANCE', M, 26, 30, 'bold', [45, 45, 45]);
+    txt('EXTRUSION LINE  ·  WORK REPORT', M + 0.5, 34, 10, 'bold', [125, 125, 125]);
+    const bx = PW - M - 70;
+    doc.setFillColor(...C.bar); doc.rect(bx, 12, 70, 10, 'F');
+    txt(boxTitle, bx + 35, 19.2, 14, 'bold', [255, 255, 255], { align: 'center' });
+    doc.setDrawColor(...C.bar); doc.setLineWidth(0.6); doc.rect(bx, 22, 70, 12);
+    txt(boxValue, bx + 35, 30.2, 13, 'bold', C.ink, { align: 'center' });
   };
-  const when = t => fmtDate(t) + ' ' + new Date(t).getFullYear() + ', ' + hm(t);
+  const band = (right) => {
+    doc.setFillColor(...C.bar); doc.rect(M, 42, W, 10, 'F');
+    doc.setFillColor(...C.bar2); doc.rect(M + W * 0.52, 42, W * 0.48, 10, 'F');
+    if (right) txt(right, M + W * 0.76, 49.2, 14, 'bold', [255, 255, 255], { align: 'center' });
+  };
+  const tab = (title, y) => { doc.setFillColor(...C.bar); doc.rect(M, y, 62, 7.5, 'F'); txt(title, M + 31, y + 5.4, 11, 'bold', [255, 255, 255], { align: 'center' }); return y + 13; };
+  const rule = (y, x1, x2) => { doc.setDrawColor(...C.line); doc.setLineWidth(0.3); doc.line(x1 == null ? M : x1, y, x2 == null ? M + W : x2, y); };
+  const field = (label, value, x, y, vx, vAlign, bold) => { txt(label, x, y, 9.5, 'normal', C.ink2); if (value != null && value !== '') txt(value, vx, y, 9.5, bold ? 'bold' : 'normal', C.ink, vAlign ? { align: vAlign } : undefined); };
   const multi = list.length > 1;
   if (multi) {
-    band('MAINTENANCE WORK REPORT', o.phrase ? o.phrase.replace(/^./, c => c.toUpperCase()) : 'Maintenance jobs', fmtDate(o.from) + ' - ' + fmtDate(o.to) + ' ' + new Date(o.to).getFullYear(), o.who ? 'Technician: ' + o.who : 'All technicians');
-    let y = 46;
+    header('Work Report', fmtDate(o.from) + ' - ' + fmtDate(o.to) + ' ' + new Date(o.to).getFullYear());
+    band((o.who ? o.who : 'All technicians').toUpperCase());
+    let y = 64;
     const done = list.filter(w => w.end), hrs = done.reduce((t, w) => t + wDur(w), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
-    doc.setFillColor(...C.panel2); doc.roundedRect(M, y, W, 22, 3, 3, 'F');
-    [['Jobs', String(list.length)], ['Time on jobs', fmtDur(hrs)], ['Breakdowns', String(list.filter(w => w.type === 'Breakdown').length)], ['Preventive', String(list.filter(w => w.type === 'Preventive').length)], ['Parts used', String(parts)]]
-      .forEach(([l, v], i) => { const x = M + 5 + i * (W / 5); txt(l.toUpperCase(), x, y + 8, 7, 'bold', C.ink2); txt(v, x, y + 16.5, 13, 'bold'); });
-    y += 32;
-    txt('JOBS', M, y, 9, 'bold'); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7;
-    drawTable(doc, y, [{ h: 'Job', w: 31 }, { h: 'Date', w: 27 }, { h: 'Equipment', w: 40 }, { h: 'Type', w: 23 }, { h: 'Technician', w: 33 }, { h: 'Time', w: 24, align: 'right' }],
-      list.map(w => [{ t: jobNo(w), b: true }, { t: fmtDate(w.start) + ' ' + hm(w.start) }, { t: clean(w.equipment), b: true }, { t: w.type }, { t: clean(w.personName || nameOf(w.uid)) }, { t: w.end ? fmtDur(wDur(w)) : 'in progress', mute: !w.end }]), ctx);
+    [['Period:', o.phrase ? o.phrase.replace(/^./, c => c.toUpperCase()) : ''], ['Jobs:', String(list.length)], ['Time on jobs:', fmtDur(hrs)]].forEach(([l, v], i) => field(l, v, M, y + i * 6.5, M + 34, null, true));
+    [['Breakdowns:', String(list.filter(w => w.type === 'Breakdown').length)], ['Preventive:', String(list.filter(w => w.type === 'Preventive').length)], ['Parts used:', String(parts)]].forEach(([l, v], i) => field(l, v, M + W * 0.56, y + i * 6.5, M + W, 'right', true));
+    doc.setDrawColor(...C.bar); doc.setLineWidth(0.6); doc.line(M + W * 0.54, 56, M + W * 0.54, y + 16);
+    y += 28;
+    y = tab('Jobs', y);
+    drawTable(doc, y, [{ h: 'Date', w: 30 }, { h: 'Equipment', w: 44 }, { h: 'Type', w: 24 }, { h: 'Technicians', w: 56 }, { h: 'Time', w: 28, align: 'right' }],
+      list.map(w => [{ t: dt(w.start) }, { t: clean(w.equipment), b: true }, { t: w.type }, { t: clean(techNames(w).join(', ')) }, { t: w.end ? fmtDur(wDur(w)) : 'in progress', mute: !w.end }]), ctx);
   }
   list.forEach((w, idx) => {
     if (multi || idx > 0) doc.addPage();
-    band('MAINTENANCE JOB  ·  ' + jobNo(w), w.equipment, fmtDate(w.start) + ' ' + new Date(w.start).getFullYear(), w.type);
-    let y = 44;
-    const tech = w.personName || nameOf(w.uid);
-    const cells = [['Type', w.type], ['Technician', tech], ['Status', w.end ? 'Finished' : 'In progress'], ['Start', when(w.start)], ['Finish', w.end ? when(w.end) : '-'], ['Duration', w.end ? fmtDur(wDur(w)) : fmtDur(wDur(w)) + ' so far']];
-    const cw = (W - 8) / 3;
-    cells.forEach(([l, v], i) => {
-      const x = M + (i % 3) * (cw + 4), yy = y + Math.floor(i / 3) * 19;
-      doc.setFillColor(...C.panel2); doc.roundedRect(x, yy, cw, 15, 2.5, 2.5, 'F');
-      txt(l.toUpperCase(), x + 4, yy + 5.6, 6.8, 'bold', C.muted);
-      txt(doc.splitTextToSize(clean(v), cw - 8)[0], x + 4, yy + 11.4, 10.5, 'bold', l === 'Status' ? (w.end ? C.run : [150, 110, 0]) : C.ink);
+    const techs = techNames(w), status = w.end ? 'Finished' : 'In progress';
+    header('Work Report', day(w.start));
+    band(w.type === 'Breakdown' ? 'CORRECTIVE' : w.type.toUpperCase());
+    // two blocks of fields
+    let y = 63;
+    field('Equipment:', w.equipment, M, y, M + 30, null, true);
+    field('Department:', 'Maintenance', M, y + 6.5, M + 30);
+    field('Logged by:', w.personName || nameOf(w.uid), M, y + 13, M + 30);
+    field('Logged on:', dt(w.createdAt || w.start), M, y + 19.5, M + 30);
+    const rx = M + W * 0.56;
+    field('Start Date:', dt(w.start), rx, y, M + W, 'right');
+    field('Finish Date:', w.end ? dt(w.end) : '-', rx, y + 6.5, M + W, 'right');
+    field('Parts used:', w.parts.length ? String(w.parts.reduce((a, p) => a + p.qty, 0)) : 'None', rx, y + 13, M + W, 'right');
+    field('Status:', status, rx, y + 19.5, M + W, 'right');
+    doc.setDrawColor(...C.bar); doc.setLineWidth(0.6);
+    doc.line(M + W * 0.54, 56, M + W * 0.54, y + 24); doc.line(M + W * 0.54, y + 24, M + W * 0.75, y + 24);
+    y += 34;
+    // comments = the problem or task
+    y = tab('Comments', y);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+    const probLines = doc.splitTextToSize(clean(w.problem || '-'), W);
+    probLines.forEach(l => { if (y > PH - 92) { doc.addPage(); y = 20; } txt(l, M, y, 10.5, 'bold'); y += 5.2; });
+    y += 3;
+    // solution on ruled lines
+    txt('Solution:', M, y, 9.5, 'normal', C.ink2);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    const fixLines = doc.splitTextToSize(clean(w.solution || (w.end ? '' : 'Job still in progress.')), W - 20);
+    if (!fixLines.length) fixLines.push('');
+    fixLines.forEach((l, i) => { if (y > PH - 92) { doc.addPage(); y = 20; } if (l) txt(l, M + 19, y, 10, 'normal', w.solution ? C.ink : C.muted); rule(y + 1.6, i ? M : M + 18); y += 6.4; });
+    y += 4;
+    // parts used
+    y = tab('Parts used', y);
+    if (!w.parts.length) { txt('No parts used.', M, y - 1, 9.5, 'normal', C.muted); y += 4; }
+    else y = drawTable(doc, y - 4, [{ h: 'Part number', w: 50 }, { h: 'Description', w: W - 50 - 22 }, { h: 'Qty', w: 22, align: 'right' }], w.parts.map(p => [{ t: clean(p.no || '-'), b: true }, { t: clean(p.desc || '') }, { t: String(p.qty) }]), ctx) + 6;
+    // notes: ruled lines to write on
+    const notesH = 13 + 3 * 8, completeH = 66;
+    if (y + notesH + completeH > PH - 16) { doc.addPage(); y = 20; }
+    y = tab('Notes', y + 2);
+    for (let i = 0; i < 3; i++) { rule(y + 2); y += 8; }
+    // work completed
+    y = Math.max(y + 6, PH - 16 - completeH);
+    y = tab('Work completed', y);
+    const cols3 = [['Type', w.type], [techs.length > 1 ? 'Technicians' : 'Technician', techs.join(', ')], ['Status', status]];
+    const cw3 = [W * 0.22, W * 0.52, W * 0.2], gap = (W - cw3.reduce((a, b) => a + b, 0)) / 2;
+    let x = M;
+    cols3.forEach(([l, v], i) => {
+      const lines = doc.splitTextToSize(clean(v), cw3[i] - 2).slice(0, 2);
+      txt(lines[0], x, y + 3, 10.5, 'bold', l === 'Status' ? (w.end ? C.run : C.warn) : C.ink);
+      if (lines[1]) txt(lines[1], x, y + 8, 10.5, 'bold');
+      rule(y + (lines[1] ? 10 : 5.5), x, x + cw3[i]); txt(l, x, y + (lines[1] ? 14.5 : 10), 9, 'normal', C.ink2);
+      x += cw3[i] + gap;
     });
-    y += 44;
-    const block = (title, body) => {
-      txt(title.toUpperCase(), M, y, 9, 'bold'); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7.5;
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-      const lines = doc.splitTextToSize(clean(body || '-'), W - 8);
-      for (let i = 0; i < lines.length; i++) {
-        if (y > PH - 62) { doc.addPage(); band('MAINTENANCE JOB  ·  ' + jobNo(w) + '  ·  CONTINUED', w.equipment, '', ''); y = 46; }
-        txt(lines[i], M + 4, y, 10, 'normal', body ? C.ink : C.muted); y += 5.2;
-      }
-      y += 5;
-    };
-    block('Problem / task', w.problem);
-    block('Work done / solution', w.solution || (w.end ? '' : 'Job still in progress.'));
-    txt('PARTS USED', M, y, 9, 'bold'); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7;
-    if (!w.parts.length) { txt('No parts used.', M + 4, y + 2, 10, 'normal', C.muted); y += 9; }
-    else y = drawTable(doc, y, [{ h: 'Part number', w: 48 }, { h: 'Description', w: W - 48 - 22 }, { h: 'Qty', w: 22, align: 'right' }], w.parts.map(p => [{ t: clean(p.no || '-'), b: true }, { t: clean(p.desc || '') }, { t: String(p.qty) }]), ctx) + 4;
-    // sign-off
-    const sy = Math.max(y + 10, PH - 46);
-    if (sy > PH - 30) { doc.addPage(); }
-    const yS = sy > PH - 30 ? PH - 46 : sy;
-    [['Technician', tech], ['Supervisor', '']].forEach(([l, v], i) => {
-      const x = M + i * (W / 2 + 4), lw = W / 2 - 4;
-      doc.setDrawColor(...C.ink2); doc.setLineWidth(0.3); doc.line(x, yS + 12, x + lw * 0.62, yS + 12); doc.line(x + lw * 0.68, yS + 12, x + lw, yS + 12);
-      txt(l.toUpperCase() + (v ? ':  ' + v : ''), x, yS + 4, 7.5, 'bold', C.muted);
-      txt('Signature', x, yS + 16.5, 7, 'normal', C.muted); txt('Date', x + lw * 0.68, yS + 16.5, 7, 'normal', C.muted);
+    y += 24;
+    const cw4 = (W - 3 * 8) / 4;
+    const sig = [['Signature', 'X'], ['Date', w.end ? day(w.end) : ''], ['Duration', w.end ? fmtDur(wDur(w)) : ''], ['Breakdown Time', w.type === 'Breakdown' && w.end ? fmtDur(wDur(w)) : (w.end ? '-' : '')]];
+    sig.forEach(([l, v], i) => {
+      const xx = M + i * (cw4 + 8);
+      if (v) txt(v, xx + (l === 'Signature' ? 0 : 1), y, l === 'Signature' ? 11 : 10.5, l === 'Signature' ? 'normal' : 'bold');
+      rule(y + 2, xx, xx + cw4); txt(l, xx, y + 6.5, 9, 'normal', C.ink2);
     });
   });
-  const n = doc.getNumberOfPages(), gen = 'Generated ' + fmtDate(Date.now()) + ' ' + new Date().getFullYear() + ' ' + hm(Date.now()) + ' by ' + myName() + ' · Extrusion Downtime Log · Maintenance';
+  const n = doc.getNumberOfPages(), gen = 'Generated ' + fmtDate(Date.now()) + ' ' + new Date().getFullYear() + ' ' + hm(Date.now()) + ' by ' + myName() + ' · Extrusion Downtime Log';
   for (let i = 1; i <= n; i++) {
     doc.setPage(i);
-    doc.setDrawColor(...C.line); doc.setLineWidth(0.2); doc.line(M, PH - 12, M + W, PH - 12);
-    txt(gen, M, PH - 7.5, 7, 'normal', C.muted);
-    txt('Page ' + i + ' of ' + n, M + W, PH - 7.5, 7, 'normal', C.muted, { align: 'right' });
+    txt(gen, M, PH - 7, 7, 'normal', C.muted);
+    txt('Page ' + i + ' of ' + n, M + W, PH - 7, 7, 'normal', C.muted, { align: 'right' });
   }
   return doc;
 }
