@@ -2219,6 +2219,20 @@ const crewName = m => (m.uid && userById(m.uid) ? userById(m.uid).name : m.name)
 const sessName = x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name) || '—';
 const holders = w => w.sessions.filter(x => !x.end);
 const hasJob = (w, uid) => holders(w).some(x => x.uid === uid);
+/* one technician's side of a job: only the work periods they had (or were added to), optionally cut to a time window.
+   Picking up a job never carries the earlier people's time: reports and work orders use this. */
+function jobView(w, t, win) {
+  const on = x => isTech(x, t) || x.helpers.some(m => isTech(m, t));
+  const ps = w.sessions.filter(on), now = Date.now(), stop = Math.min(now, w.end || now);
+  let segs = ps.map(x => [x.start, x.end || stop]);
+  if (win) segs = segs.map(([a, c]) => [Math.max(a, win.from), Math.min(c, win.to, stop)]).filter(([a, c]) => c >= a);
+  const crew = uniq([t.name].concat(...ps.map(x => isTech(x, t) ? x.helpers.map(crewName) : [sessName(x)].concat(x.helpers.map(crewName))))).filter(n => n && n !== '—');
+  return { t, segs, crew, ms: segs.reduce((q, [a, c]) => q + segMs(w, a, c), 0) };
+}
+const meT = () => ({ uid: myUid(), name: myName() });
+const workedOn = (w, t) => w.sessions.some(x => isTech(x, t) || x.helpers.some(m => isTech(m, t)));
+/* the work order of a job: my side if I worked on it, otherwise the side of whoever has (or last had) it */
+function defaultView(w) { const me = meT(); if (workedOn(w, me)) return jobView(w, me); const l = lastSess(w); return jobView(w, { uid: l.uid, name: sessName(l) }); }
 const canPickUp = w => !!w && isOpenJob(w) && (isMaint() || isAdmin()) && !hasJob(w, myUid());
 const wSpan = w => (w.end || Date.now()) - w.start;
 const openWait = w => (w.waits || []).find(x => !x.to) || null;
@@ -2251,6 +2265,11 @@ function wList() {
   const b = wBounds(S.wrange), mine = S.wwho === 'mine';
   return S.work.filter(w => (isOpenJob(w) || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.sessions.some(x => x.uid === myUid() || x.helpers.some(m => m.uid === myUid())))).sort((a, c) => isOpenJob(c) - isOpenJob(a) || c.start - a.start);
 }
+/* everyone's time on a job, in order: shown in the Everyone list only */
+function histEl(w) {
+  if (w.sessions.length < 2 && !(w.sessions[0] && w.sessions[0].helpers.length)) return null;
+  return h('span', { class: 'w-hist', translate: 'no' }, w.sessions.map(x => h('span', null, [sessName(x)].concat(x.helpers.map(crewName)).join(', ') + ' · ' + fmtDate(x.start) + ' ' + hm(x.start) + '–' + (x.end ? (ymd(x.end) === ymd(x.start) ? '' : fmtDate(x.end) + ' ') + hm(x.end) : tx('now')))));
+}
 function renderMaint() {
   buildSeg('wRange', WRANGES, S.wrange, v => { S.wrange = v; LS.set('wrange', v); renderMaint(); });
   buildSeg('wWho', [{ id: 'all', label: 'Everyone' }, { id: 'mine', label: 'Mine' }], S.wwho, v => { S.wwho = v; LS.set('wwho', v); renderMaint(); });
@@ -2274,7 +2293,8 @@ function renderMaint() {
     return;
   }
   if (!S.workLoaded) { rc($('#wBody'), h('div', { class: 'empty' }, h('p', { class: 'empty-t' }, S.workErr ? "Couldn't load the maintenance log." : 'Loading the maintenance log…'), S.workErr ? h('p', { class: 'empty-s' }, S.workErr) : null)); return; }
-  const hrs = done.reduce((t, w) => t + wDur(w), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
+  const mineV = S.wwho === 'mine', me = meT();
+  const hrs = done.reduce((t, w) => t + (mineV ? jobView(w, me).ms : wDur(w)), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
   const nType = t => list.filter(w => w.type === t).length;
   const kp = h('div', { class: 'kpis k4' },
     kpiEl('Jobs', String(list.length), '', open.length ? tx('{0} in progress', open.filter(w => w.status === 'progress').length) + ' · ' + tx('{0} waiting for parts', open.filter(w => w.status === 'parts').length) : b.phrase),
@@ -2284,7 +2304,8 @@ function renderMaint() {
   const openCards = open.map(w => h('article', { class: 'card wcard k-' + w.status, onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
     h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, w.status === 'parts' ? 'parts' : 'warn', statLabel(w.status)); return p; })()),
     h('div', { class: 'wc-b' },
-      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', 'Who has it', holders(w).length ? holders(w).map(x => tx('{0} since {1}', [sessName(x)].concat(x.helpers.map(crewName)).join(', '), fmtWhen(x.start))).join(', ') : tx('Nobody right now')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', openWait(w) ? tx('{0}, stopped since {1}', fmtDur(wDur(w)), hm(openWait(w).from)) : fmtDur(wDur(w))))),
+      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', 'Who has it', holders(w).length ? holders(w).map(x => tx('{0} since {1}', [sessName(x)].concat(x.helpers.map(crewName)).join(', '), fmtWhen(x.start))).join(', ') : tx('Nobody right now')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', (t => openWait(w) ? tx('{0}, stopped since {1}', t, hm(openWait(w).from)) : t)(fmtDur(mineV ? jobView(w, me).ms : wDur(w))))),
+      mineV ? null : histEl(w)),
     hasJob(w, myUid()) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
       h('button', { type: 'button', class: 'btn btn-go', onclick: () => openJob(w.id, true) }, 'Fixed'),
       w.status === 'parts' ? h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'progress', e.currentTarget) }, 'Parts arrived, back to work') : h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'parts', e.currentTarget) }, 'Waiting for parts'),
@@ -2292,12 +2313,13 @@ function renderMaint() {
     : canPickUp(w) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
       h('button', { type: 'button', class: 'btn btn-primary', onclick: e => pickUp(w, e.currentTarget) }, w.status === 'parts' ? 'Parts arrived, back to work' : 'Pick up this job'),
       canEditJob(w) ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => openJob(w.id) }, 'Edit') : null), null) : null));
-  const row = w => h('div', { class: 'wrow', role: 'button', tabindex: '0', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); }, onkeydown: keyPress },
-    h('span', { class: 'w-when' }, h('b', null, fmtDate(w.start)), hm(w.start) + '–' + (w.end ? hm(w.end) : tx('now'))),
-    h('span', { class: 'w-main' }, h('span', { class: 'w-eq' }, w.equipment, h('span', { class: 'wtype t-' + w.type.toLowerCase() }, w.type)), h('span', { class: 'w-pr' }, w.problem || '—')),
-    h('span', { class: 'w-dur' }, fmtDur(wDur(w)), w.parts.length ? h('small', null, plural(w.parts.reduce((a, p) => a + p.qty, 0), 'part')) : null, waitMs(w) >= MIN ? h('small', null, tx('+{0} waiting', fmtDur(waitMs(w)))) : null),
-    h('span', { class: 'w-by', title: techNames(w).join(', '), translate: 'no' }, techShort(w)),
-    h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': tx('PDF for {0}', jobNo(w)), onclick: e => workPdf([w], { single: true }, e.currentTarget) }, 'PDF'));
+  const row = w => { const v = mineV ? jobView(w, me) : null, a = v && v.segs.length ? v.segs[0][0] : w.start, z = v && v.segs.length ? v.segs[v.segs.length - 1][1] : w.end;
+    return h('div', { class: 'wrow', role: 'button', tabindex: '0', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); }, onkeydown: keyPress },
+    h('span', { class: 'w-when' }, h('b', null, fmtDate(a)), hm(a) + '–' + (z ? hm(z) : tx('now'))),
+    h('span', { class: 'w-main' }, h('span', { class: 'w-eq' }, w.equipment, h('span', { class: 'wtype t-' + w.type.toLowerCase() }, w.type)), h('span', { class: 'w-pr' }, w.problem || '—'), v ? null : histEl(w)),
+    h('span', { class: 'w-dur' }, fmtDur(v ? v.ms : wDur(w)), w.parts.length ? h('small', null, plural(w.parts.reduce((a, p) => a + p.qty, 0), 'part')) : null, !v && waitMs(w) >= MIN ? h('small', null, tx('+{0} waiting', fmtDur(waitMs(w)))) : null),
+    h('span', { class: 'w-by', title: (v ? v.crew : techNames(w)).join(', '), translate: 'no' }, v ? v.crew[0] + (v.crew.length > 1 ? ' +' + (v.crew.length - 1) : '') : techShort(w)),
+    h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': tx('PDF for {0}', jobNo(w)), onclick: e => workPdf([w], { single: true }, e.currentTarget) }, 'PDF')); };
   const days = []; let cur = '';
   for (const w of done) { const d = fmtDay(w.start); if (d !== cur) { cur = d; days.push(h('div', { class: 'dayhead' }, d)); } days.push(row(w)); }
   rc($('#wBody'),
@@ -2616,7 +2638,8 @@ async function downloadWorkReport(e) {
   e.preventDefault();
   const r = WR.shift ? workInShift(WR.tech, WR.shift) : null;
   if (!r || !r.list.length) return;
-  if (await workPdf(r.list.map(x => x.w), { summary: true, tech: WR.tech, shift: WR.shift, rep: r }, $('#wrGo'))) closeWorkReport();
+  const views = {}; r.list.forEach(x => { views[x.w.id] = Object.assign(jobView(x.w, WR.tech, r.win), { state: x.state }); });
+  if (await workPdf(r.list.map(x => x.w), { summary: true, tech: WR.tech, shift: WR.shift, rep: r, views }, $('#wrGo'))) closeWorkReport();
 }
 /* first page of the shift report: who, which shift and clock times, the totals, then every job they worked on */
 function drawWorkSummary(doc, list, o) {
@@ -2689,7 +2712,8 @@ function drawWork(jsPDF, list, o) {
   if (o.summary) drawWorkSummary(doc, list, o);
   list.forEach((w, idx) => {
     if (idx > 0 || o.summary) doc.addPage();
-    const techs = techNames(w), status = statEn(w.status);
+    const v = (o.views && o.views[w.id]) || defaultView(w), segs = v.segs.length ? v.segs : [[w.start, w.end || Date.now()]];
+    const st = v.state || w.status, techs = v.crew.length ? v.crew : techNames(w), status = statEn(st);
     // company heading
     if (cname) txt(cname, L - 0.8, 25.5, 56, 'bold', K.logo);
     if (csub) txt(csub.toUpperCase(), L, 33, 16.5, 'bold', K.logo2);
@@ -2708,7 +2732,7 @@ function drawWork(jsPDF, list, o) {
     lf.forEach(([l, v], i) => { const y = 62 + i * 4; txt(l, L + 1, y, 9.5, 'normal', K.label); if (v) txt(v, L + 33, y, 9.5, 'normal'); });
     // right fields, with the frame on the left and bottom
     const rx = 117, vx = R - 1, top = 50.5;
-    const rows = [['Code:', '000000 - Maintenance'], ['Worker(s):', techs, true], ['Sender:', ''], ['Receiver:', ''], ['Start Date:', date(w.start) + ' ' + hm(w.start)], ['Requisition Date:', date(w.createdAt || w.start)], ['Priority:', ''], ['Late:', ''], ['Classification:', ''], ['Execution Mode:', ''], ['Dep./Res.:', 'Maintenance / Technicien Maintenance'], ['Estimated Time:', '']];
+    const rows = [['Code:', '000000 - Maintenance'], ['Worker(s):', techs, true], ['Sender:', ''], ['Receiver:', ''], ['Start Date:', date(segs[0][0]) + ' ' + hm(segs[0][0])], ['Requisition Date:', date(w.createdAt || w.start)], ['Priority:', ''], ['Late:', ''], ['Classification:', ''], ['Execution Mode:', ''], ['Dep./Res.:', 'Maintenance / Technicien Maintenance'], ['Estimated Time:', '']];
     let y = top;
     rows.forEach(([l, v, bold]) => {
       txt(l, rx, y, 9.5, bold ? 'bold' : 'normal', K.label);
@@ -2734,7 +2758,7 @@ function drawWork(jsPDF, list, o) {
     };
     y += 0.4;
     ruled('Diagnosis:', w.diagnosis);
-    ruled('Solution:', w.solution);
+    ruled('Solution:', st === 'fixed' || !v.state ? w.solution : '');
     y += 3;
     // notes: parts used are written on the lines; the rest stay blank to write on
     tab('Notes', y); y += 5.6;
@@ -2754,17 +2778,17 @@ function drawWork(jsPDF, list, o) {
     });
     y += 16;
     // the date of the last work on it: the fixed date, or the last time someone worked on it
-    const lastWork = w.status === 'fixed' ? w.end : Math.max(...w.sessions.map(x => x.end || x.start));
-    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', date(lastWork)], [L + 117, 34, 'Duration', hms(wDur(w))], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && w.status === 'fixed' ? hms(wSpan(w)) : '']];
+    const lastWork = segs[segs.length - 1][1];
+    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', date(lastWork)], [L + 117, 34, 'Duration', hms(v.ms)], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && st === 'fixed' ? hms(v.ms) : '']];
     c4.forEach(([x, wd, l, v]) => {
       if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
     });
     // every work period: start time and end time, under Duration and Breakdown Time
-    w.sessions.forEach(x => {
+    segs.forEach(([a, c]) => {
       y += 15;
       if (y > PH - 12) { doc.addPage(); y = 20; }
-      [[L + 117, 34, 'Start Time', dtm(x.start)], [L + 159, 34, 'End Time', x.end ? dtm(x.end) : '']].forEach(([cx, wd, l, v]) => {
+      [[L + 117, 34, 'Start Time', dtm(a)], [L + 159, 34, 'End Time', dtm(c)]].forEach(([cx, wd, l, v]) => {
         if (v) { doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); txt(doc.splitTextToSize(clean(v), wd)[0], cx, y - 1.6, 9.5, 'bold'); }
         line(cx, y + 1.4, cx + wd, y + 1.4); txt(l, cx, y + 5.6, 10, 'normal', K.label);
       });

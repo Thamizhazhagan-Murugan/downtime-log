@@ -711,6 +711,8 @@ details.howto[open] summary{margin-bottom:12px}
 .w-pr{font-size:.88rem;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .w-dur{display:grid;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .w-dur small{font-weight:400;color:var(--muted);font-size:.78rem}
+.w-hist{display:grid;gap:2px;margin-top:4px;font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.wcard .w-hist{padding:0 2px}
 .w-by{font-size:.84rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wtype{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font:600 .72rem/1 var(--f-body);background:var(--panel-2);color:var(--ink-2)}
 .wtype.t-breakdown{background:var(--down-soft);color:var(--down-ink)}
