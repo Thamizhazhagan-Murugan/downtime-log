@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="css/app.css?v=15">
+<link rel="stylesheet" href="css/app.css?v=16">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
 </head>
 <body>
@@ -329,7 +329,7 @@
       <label class="field" for="ed-alarm" id="edAlarmWrap"><span>Alarm</span><select id="ed-alarm"></select></label>
       <label class="field" for="ed-stop" id="edStopWrap" hidden><span>Press</span><select id="ed-stop"><option value="">Kept extruding</option><option value="1">Stopped for this</option></select></label>
       <label class="field" for="ed-at"><span>Started at</span><input id="ed-at" type="datetime-local"></label>
-      <label class="field" for="ed-note"><span>Notes</span><input id="ed-note" type="text" maxlength="120"></label>
+      <label class="field" for="ed-note"><span id="edNoteLbl">Notes</span><input id="ed-note" type="text" maxlength="160"></label>
       <p class="meta" id="edMeta"></p>
       <p id="edErr" class="form-err" role="alert" hidden></p>
     </div>
@@ -362,7 +362,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="js/config.js?v=15"></script>
-<script src="js/app.js?v=15"></script>
+<script src="js/config.js?v=16"></script>
+<script src="js/app.js?v=16"></script>
 </body>
 </html>

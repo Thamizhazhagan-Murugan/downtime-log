@@ -215,7 +215,7 @@ function normEv(id, d) {
   return { id, machine, state, run: d.run === true, stop: d.stop === true, mode: MODES.includes(d.mode) ? d.mode : '', at,
     alarm: str(d.alarm, 40), note: str(d.note, 160), code: str(d.code, 40), uid: str(d.uid, 128) || null,
     personName: str(d.personName, 60), sessionId: str(d.sessionId, 60) || null,
-    createdAt: num(d.createdAt) || at, updatedAt: num(d.updatedAt) };
+    createdAt: num(d.createdAt) || at, updatedAt: num(d.updatedAt), noteBy: str(d.noteBy, 128), noteByName: str(d.noteByName, 60) };
 }
 const byAt = (a, b) => (a.at - b.at) || ((a.createdAt || 0) - (b.createdAt || 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const withRun = e => Object.assign({}, e, { run: isRunState(e.machine, e.state, e.run) });
@@ -488,6 +488,8 @@ function myUid() { return S.fbUser ? S.fbUser.uid : null; }
 function myName() { return (S.me && S.me.name) || (S.fbUser && (S.fbUser.displayName || String(S.fbUser.email || '').split('@')[0])) || ''; }
 const userById = id => S.users.find(u => u.id === id) || null;
 function canEditEntry(e) { return !!e && !e.example && !!S.db && isActive() && (isAdmin() || (!!myUid() && e.uid === myUid())); }
+/* Maintenance may add to or correct the description on anyone else's entry, but not its time, state, mode, alarm or press setting. */
+function canNoteEntry(e) { return !!e && !e.example && !!S.db && isMaint() && !canEditEntry(e); }
 function normUser(id, d) {
   if (!d) return null;
   const str = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
@@ -500,7 +502,7 @@ function normSession(id, d) {
 }
 function fbMsg(x) {
   const c = x && x.code;
-  if (c === 'permission-denied') return "You don't have access to do that. Ask an admin.";
+  if (c === 'permission-denied') return isSuper() ? 'The database refused this. If the app was just updated, publish the latest database rules (Firebase > Firestore Database > Rules).' : "You don't have access to do that. Ask an admin.";
   if (c === 'unavailable') return "Can't reach the database right now. It saves on this device and syncs when the connection is back.";
   if (c === 'resource-exhausted') return 'The database is busy or over its free limit. Wait a moment and try again.';
   if (c === 'failed-precondition') return 'The database needs a one-time index. Open the browser console for the link, or see the README.';
@@ -1287,7 +1289,7 @@ function renderHistory() {
   if (!D.ready) { box.hidden = true; empty.hidden = false; rc(empty, h('p', { class: 'empty-t' }, S.conn === 'offline' ? "The shared log isn't available here." : 'Loading ' + b.phrase + '…')); $('#hCount').textContent = ''; return; }
   const list = historyList(b, D);
   const next = nextMap(D.events.concat(Object.values(D.seeds || {})));
-  $('#hCount').textContent = (list.length === 1 ? '1 entry' : list.length + ' entries') + ' in ' + b.phrase + (useExample() ? ' · example data' : '') + '. ' + (isAdmin() ? 'Select an entry to correct it.' : 'Select one of your entries to correct it.');
+  $('#hCount').textContent = (list.length === 1 ? '1 entry' : list.length + ' entries') + ' in ' + b.phrase + (useExample() ? ' · example data' : '') + '. ' + (isAdmin() ? 'Select an entry to correct it.' : isMaint() ? 'Select one of your entries to correct it, or anyone else\'s to change its description.' : 'Select one of your entries to correct it.');
   if (!list.length) { box.hidden = true; empty.hidden = false; rc(empty, h('p', { class: 'empty-t' }, 'No entries in ' + b.phrase + '.')); return; }
   empty.hidden = true; box.hidden = false;
   const now = Date.now(), out = []; let day = '';
@@ -1878,7 +1880,8 @@ function fillEditAlarms(e, state) {
 function openEdit(id) {
   const e = findEvent(id); if (!e) return;
   editId = id; edErr('');
-  const ro = !canEditEntry(e);
+  const full = canEditEntry(e), noteOnly = canNoteEntry(e), ro = !full && !noteOnly;
+  S.editNoteOnly = noteOnly;
   $('#edKicker').textContent = fmtDay(e.at) + ' · ' + hm(e.at);
   $('#edTitle').textContent = e.machine + ': ' + e.state;
   const mc = cfgMachine(e.machine);
@@ -1888,14 +1891,17 @@ function openEdit(id) {
   fillEditAlarms(e, e.state);
   $('#edStopWrap').hidden = ruleOf(e.machine) !== 'optional';
   $('#ed-stop').value = e.stop ? '1' : '';
-  $('#ed-at').value = toLocalInput(e.at); $('#ed-note').value = [e.note, e.code].filter(Boolean).join(' ');
+  $('#ed-at').value = toLocalInput(e.at); $('#ed-note').value = noteOnly ? e.note : [e.note, e.code].filter(Boolean).join(' ');
   const meta = $('#edMeta'); meta.replaceChildren();
-  if (!e.example) { meta.append('Logged by ', whoEl(e), ' · saved ' + fmtWhen(e.createdAt) + (e.updatedAt && e.updatedAt - e.createdAt > 5000 ? ' · edited ' + fmtWhen(e.updatedAt) : '')); fillNames(meta); }
-  $$('#edForm input, #edForm select').forEach(i => { i.disabled = ro; });
+  if (!e.example) { meta.append('Logged by ', whoEl(e), ' · saved ' + fmtWhen(e.createdAt) + (e.updatedAt && e.updatedAt - e.createdAt > 5000 ? ' · edited ' + fmtWhen(e.updatedAt) : '') + (e.noteByName ? ' · description by ' + (userById(e.noteBy) ? userById(e.noteBy).name : e.noteByName) : '')); fillNames(meta); }
+  $$('#edForm input, #edForm select').forEach(i => { i.disabled = ro || (noteOnly && i.id !== 'ed-note'); });
   $('#edActions').hidden = ro;
+  $('#edDelete').hidden = noteOnly;
+  $('#edNoteLbl').textContent = noteOnly ? 'Description' : 'Notes';
   const del = $('#edDelete'); del.classList.remove('armed'); del.textContent = 'Delete';
   const note = $('#edNote');
   note.textContent = e.example ? 'This is an example entry. It is not saved anywhere.'
+    : noteOnly ? 'Logged by ' + whoText(e) + '. As maintenance you can change the description. The time, state, mode and alarm stay as they were logged.'
     : ro ? 'Only admins and the person who logged this entry can change it.'
     : 'Changing the time or state recalculates the timeline for everyone.';
   note.hidden = false;
@@ -1904,7 +1910,15 @@ function openEdit(id) {
 function closeEdit() { if (typeof edit.close === 'function') edit.close(); else edit.removeAttribute('open'); editId = null; }
 async function saveEdit(ev) {
   ev.preventDefault();
-  const e = findEvent(editId); if (!e || !canEditEntry(e)) return;
+  const e = findEvent(editId); if (!e) return;
+  if (canNoteEntry(e)) {
+    const note = $('#ed-note').value.trim();
+    if (e.alarm === OTHER && !note) return edErr('This entry is an Other alarm, so it needs a description.');
+    if (note === e.note) { closeEdit(); return; }
+    S.db.collection('events').doc(editId).update({ note: note.slice(0, 160), updatedAt: Date.now(), noteBy: myUid(), noteByName: myName() }).catch(x => toast(fbMsg(x)));
+    closeEdit(); toast('Description updated'); renderAll(); return;
+  }
+  if (!canEditEntry(e)) return;
   const at = fromLocalInput($('#ed-at').value), now = Date.now();
   if (!at) return edErr('Enter when it started.');
   if (at > now + MIN) return edErr('That time is in the future.');

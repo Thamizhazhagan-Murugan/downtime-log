@@ -65,7 +65,9 @@ service cloud.firestore {
         && request.resource.data.state is string
         && request.resource.data.at is number;
       allow update: if isAdmin()
-        || (isActive() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid);
+        || (isActive() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid)
+        // Maintenance may change only the description on someone else's entry.
+        || (isMaint() && onlyChanges(['note', 'updatedAt', 'noteBy', 'noteByName']) && request.resource.data.noteBy == request.auth.uid);
       allow delete: if isAdmin() || (isActive() && resource.data.uid == request.auth.uid);
     }
 

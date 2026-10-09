@@ -25,6 +25,7 @@ It runs in any browser and installs on phones and tablets as an app (PWA). Every
 - A new account waits as **pending** until an admin approves it.
 - **Users** clock in, log entries and see all the analysis. They can correct their own entries.
 - Every user is on a **team**: **Operator** (the default) or **Maintenance**. Admins set it in **Admin > Users**. Maintenance users also get the **Maintenance** tab. They see the whole team's jobs and can edit their own.
+- Maintenance users log the line like operators. On entries logged by someone else they can change only the description (notes), never the time, state, mode or alarm, and they can't delete them. Operators can't change entries logged by maintenance (or by anyone else).
 - **Admins** also approve or turn off users, edit machines, states, alarms and shifts, see all clock-ins, and download anyone's shift report.
 - The **main admin** is the email in `js/config.js` (`superAdminEmail`). Only that account can make or remove admins. It must sign in with a verified email. Google sign-in is always verified. Email/password accounts must open the verification link first.
 
