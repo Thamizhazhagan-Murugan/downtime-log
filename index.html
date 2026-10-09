@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="css/app.css?v=22">
+<link rel="stylesheet" href="css/app.css?v=23">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
 </head>
 <body>
@@ -291,9 +291,9 @@
         <div class="sh-sec"><div class="sh-row"><p class="lbl">Status</p><button type="button" class="linkbtn" id="jbAddWait">+ Wait for parts</button></div><div class="modes three" id="jbStatus"></div></div>
         <div class="row2 jtimes">
           <div class="field" id="jbStartWrap"><div class="sh-row"><label for="jb-start">Start</label><button type="button" class="linkbtn" id="jbStartNow">Now</button></div><input id="jb-start" type="datetime-local"></div>
-          <div class="field" id="jbEndWrap"><div class="sh-row"><label for="jb-end">Fixed at</label><button type="button" class="linkbtn" id="jbEndNow">Now</button></div><input id="jb-end" type="datetime-local"><small class="muted" id="jbEndHint"></small></div>
+          <div class="field" id="jbEndWrap"><div class="sh-row"><label for="jb-end" id="jbEndLbl">Fixed at</label><button type="button" class="linkbtn" id="jbEndNow">Now</button></div><input id="jb-end" type="datetime-local"><small class="muted" id="jbEndHint"></small></div>
         </div>
-        <div class="sh-sec" id="jbSessWrap" hidden><p class="lbl">Who worked on it</p><div class="wts" id="jbSess"></div></div>
+        <div class="sh-sec" id="jbSessWrap" hidden><div class="sh-row"><p class="lbl">Who worked on it</p><button type="button" class="linkbtn" id="jbAddSess">+ Add my time</button></div><div class="wts" id="jbSess"></div></div>
         <div class="sh-sec" id="jbWaitsWrap" hidden><div class="wts" id="jbWaits"></div><p class="muted jb-wait" id="jbWait" hidden></p></div>
       </div>
       <div class="jcol">
@@ -380,8 +380,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="js/i18n.js?v=22"></script>
-<script src="js/config.js?v=22"></script>
-<script src="js/app.js?v=22"></script>
+<script src="js/i18n.js?v=23"></script>
+<script src="js/config.js?v=23"></script>
+<script src="js/app.js?v=23"></script>
 </body>
 </html>

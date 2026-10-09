@@ -2180,7 +2180,7 @@ function normWork(id, d) {
   // jobs set to waiting before waits were recorded: count from the last change
   if (status === 'parts' && !waits.some(x => !x.to)) waits.push({ from: Math.max(d.start, typeof d.updatedAt === 'number' ? d.updatedAt : d.start), to: null });
   // work periods: each time someone takes the job they get their own start and end, even the same person on a later shift
-  const sessions = Array.isArray(d.sessions) ? d.sessions.filter(x => x && typeof x.start === 'number').slice(0, 60).map(x => ({ uid: str(x.uid, 128), name: str(x.name, 60), start: x.start, end: typeof x.end === 'number' ? Math.max(x.end, x.start) : null })).sort((a, b) => a.start - b.start) : [];
+  const sessions = Array.isArray(d.sessions) ? d.sessions.filter(x => x && typeof x.start === 'number').slice(0, 60).map(x => Object.assign({ uid: str(x.uid, 128), name: str(x.name, 60), start: x.start, end: typeof x.end === 'number' ? Math.max(x.end, x.start) : null }, x.manual === true ? { manual: true } : {})).sort((a, b) => a.start - b.start) : [];
   if (!sessions.length) sessions.push({ uid: str(d.uid, 128), name: str(d.personName, 60), start: d.start, end: typeof d.end === 'number' ? d.end : null });
   if (status === 'fixed') sessions.forEach(x => { if (!x.end) x.end = Math.max(x.start, d.end); });
   return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, sessions, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Corrective' ? 'Breakdown' : WTYPES.includes(d.type) ? d.type : 'Other',
@@ -2215,6 +2215,21 @@ const hasJob = (w, uid) => holders(w).some(x => x.uid === uid);
 const canPickUp = w => !!w && isOpenJob(w) && (isMaint() || isAdmin()) && !hasJob(w, myUid());
 const wSpan = w => (w.end || Date.now()) - w.start;
 const openWait = w => (w.waits || []).find(x => !x.to) || null;
+/* time someone entered as worked counts as work, even inside a wait for parts: the wait is split around it */
+function carveWaits(waits, sessions) {
+  let ws = waits.map(x => ({ from: x.from, to: x.to }));
+  sessions.filter(x => x.manual && x.end).forEach(x => {
+    ws = ws.flatMap(wt => {
+      const to = wt.to == null ? Infinity : wt.to;
+      if (x.end <= wt.from || x.start >= to) return [wt];
+      const out = [];
+      if (x.start > wt.from) out.push({ from: wt.from, to: x.start });
+      if (x.end < to) out.push({ from: x.end, to: wt.to });
+      return out;
+    });
+  });
+  return ws.sort((a, b) => a.from - b.from);
+}
 function waitsFor(prev, status, at) {
   const ws = (prev || []).map(x => ({ from: x.from, to: x.to }));
   const open = ws.find(x => !x.to);
@@ -2324,12 +2339,17 @@ function renderJob() {
     crew.map(u => { const on = JB.helpers.some(x => x.uid === u.id); return h('button', { type: 'button', class: 'chip', disabled: ro, 'aria-pressed': String(on), onclick: () => { if (on) JB.helpers = JB.helpers.filter(x => x.uid !== u.id); else JB.helpers.push({ uid: u.id, name: u.name }); renderJob(); } }, h('i'), u.name); }),
     extra.map(x => h('span', { class: 'chip', 'aria-pressed': 'true' }, h('i'), x.name)));
   rc($('#jbStatus'), WSTAT.map(([k, l]) => h('button', { type: 'button', class: 'mode st-' + k, disabled: ro, 'aria-pressed': String(JB.status === k), onclick: () => setFormStatus(k) }, k === 'parts' ? txAt('Waiting for parts (short)', l) : l)));
-  $('#jbEndWrap').hidden = JB.status !== 'fixed';
+  $('#jbEndWrap').hidden = JB.id ? JB.status !== 'fixed' : false;
+  $('#jbEndLbl').textContent = JB.status === 'fixed' ? 'Fixed at' : 'Stopped working at';
+  $('#jbEndHint').textContent = JB.status === 'fixed' ? '' : tx('Leave empty if you are still working on it.');
+  $('#jbEndHint').hidden = JB.status === 'fixed';
+  $('#jbAddSess').hidden = ro;
+  $('#job .jtimes').hidden = $('#jbEndWrap').hidden && !!JB.id && JB.sessions.length > 0;
   // a saved job: its start is the start of the first work period, so the periods replace the Start box
   $('#jbStartWrap').hidden = !!JB.id && JB.sessions.length > 0;
   $('#jbSessWrap').hidden = !JB.id || !JB.sessions.length;
   const sdt = (x, k, lbl) => h('label', { class: 'field' }, h('span', null, lbl), h('input', { type: 'datetime-local', value: x[k] ? toLocalInput(x[k]) : '', disabled: ro,
-    oninput: e => { x[k] = fromLocalInput(e.target.value); jbErr(''); } }));
+    oninput: e => { x[k] = fromLocalInput(e.target.value); x.manual = true; jbErr(''); } }));
   rc($('#jbSess'), JB.sessions.map((x, i) => h('div', { class: 'wt' },
     sdt(x, 'start', tx('{0} from', sessName(x))),
     sdt(x, 'end', x.end ? 'To' : JB.status === 'fixed' ? 'To (when fixed)' : 'To (still has it)'),
@@ -2353,7 +2373,6 @@ function renderJob() {
     JB.parts.length ? null : h('p', { class: 'muted', style: 'font-size:.88rem' }, ro ? 'No parts used.' : 'No parts used. Add one if you replaced anything.'));
   $('#jbAddPart').hidden = ro;
   $('#jbEndNow').hidden = ro; $('#jbStartNow').hidden = ro;
-  $('#jbEndHint').textContent = '';
   $('#jbDelete').hidden = !w || ro;
   $('#jbPdf').hidden = !w;
   $('#jbSave').hidden = ro;
@@ -2376,15 +2395,21 @@ function setFormStatus(k) {
   if (k === 'parts') {
     const auto = JB.waits.find(x => x._auto);
     if (auto) { auto.to = null; delete auto._auto; }
-    else if (!JB.waits.some(x => !x.to)) JB.waits.push({ from: Date.now(), to: null, _new: true });
+    else if (JB.id && !JB.waits.some(x => !x.to)) JB.waits.push({ from: Date.now(), to: null, _new: true });
   } else {
     JB.waits = JB.waits.filter(x => !(x._new && !x.to));
     JB.waits.forEach(x => { if (!x.to) { x.to = Date.now(); x._auto = true; } });
   }
   if (k === 'fixed') { if (!$('#jb-end').value) $('#jb-end').value = toLocalInput(Date.now()); }
-  else $('#jb-end').value = '';
+  else if (JB.id) $('#jb-end').value = '';
   jbErr(''); renderJob();
   if (k === 'fixed' && !$('#jb-fix').value.trim()) $('#jb-fix').focus();
+}
+function addMyTime() {
+  const now = Date.now();
+  JB.sessions.push({ uid: myUid(), name: myName(), start: now - HOUR, end: now, manual: true });
+  renderJob();
+  const r = $$('#jbSess .wt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus();
 }
 function addPart() { JB.parts.push({ no: '', desc: '', qty: 1 }); renderJob(); const r = $$('#jbParts .prt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus(); }
 function jobFromForm() {
@@ -2400,10 +2425,14 @@ function jobFromForm() {
   if (status === 'fixed' && !end) throw 'Enter when the job was fixed.';
   if (end != null && end < start) throw 'The finish time must be after the start time.';
   if (end != null && end > Date.now() + 5 * MIN) throw 'The finish time is in the future.';
+  // a job entered afterwards: when the work stopped, even if it is not finished
+  const stopV = !JB.id && status !== 'fixed' ? $('#jb-end').value : '', stop = stopV ? fromLocalInput(stopV) : null;
+  if (stop != null && stop < start) throw 'The stop time must be after the start time.';
+  if (stop != null && stop > Date.now() + 5 * MIN) throw 'The stop time is in the future.';
   if (status === 'fixed' && !solution) throw 'Describe the solution before marking the job fixed.';
   // waits for parts. The time boxes only go to the minute, so a time in the same minute counts as that moment.
-  const waits = JB.waits.map(x => ({ from: x.from, to: x.to }));
-  if (status === 'parts' && !waits.some(x => !x.to)) waits.push({ from: Date.now(), to: null });
+  let waits = JB.waits.map(x => ({ from: x.from, to: x.to }));
+  if (status === 'parts' && !waits.some(x => !x.to)) waits.push({ from: stop || Date.now(), to: null });
   waits.sort((a, b) => (a.from || 0) - (b.from || 0));
   waits.forEach((x, i) => {
     if (!x.from) throw 'Enter when the job started waiting for parts.';
@@ -2419,7 +2448,7 @@ function jobFromForm() {
     x.to = Math.max(x.from, end != null ? Math.min(x.to, end) : x.to);
   });
   // work periods: a new job starts one for the person logging it
-  const sessions = useSess ? JB.sessions.map(x => ({ uid: x.uid, name: x.name, start: x.start, end: x.end })) : [{ uid: myUid(), name: myName(), start, end: null }];
+  const sessions = useSess ? JB.sessions.map(x => Object.assign({ uid: x.uid, name: x.name, start: x.start, end: x.end }, x.manual ? { manual: true } : {})) : [Object.assign({ uid: myUid(), name: myName(), start, end: stop }, stop ? { manual: true } : {})];
   sessions.sort((a, b) => a.start - b.start).forEach(x => {
     if (x.start > Date.now() + 5 * MIN) throw 'A work period starts in the future.';
     if (end != null && x.start - end >= MIN) throw 'A work period starts after the job was fixed.';
@@ -2430,6 +2459,7 @@ function jobFromForm() {
       x.end = Math.max(x.start, end != null ? Math.min(x.end, end) : x.end);
     } else if (status === 'fixed') x.end = Math.max(x.start, end);
   });
+  waits = carveWaits(waits, sessions);
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
   return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end, waits, sessions };
 }
@@ -2610,12 +2640,12 @@ function drawWorkSummary(doc, list, o) {
   y += 29;
   // the jobs
   txt(tr('Jobs worked on').toUpperCase(), M, y, 9, 'bold', C.ink); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7;
-  const others = w => techNames(w).filter(n => n !== t.name);
   const cut = (v, n) => { v = String(v || '-').replace(/\s+/g, ' ').trim(); return v.length > n ? v.slice(0, n - 3).trimEnd() + '...' : v; };   // the full text is on the work order
   const stLbl = k => k === 'fixed' ? tx('Fixed') : k === 'parts' ? tx('Waiting for parts') : tx('Not finished');
-  y = drawTable(doc, y, [{ h: txAt('Time (clock)', 'Time'), w: 22 }, { h: txAt('Equipment (one)', 'Equipment'), w: 30 }, { h: 'Type', w: 20 }, { h: 'Problem / task', w: 37 }, { h: 'Solution', w: 37 }, { h: 'Status', w: 20 }, { h: 'Duration', w: 21.9, align: 'right' }],
-    items.map(({ w, segs, ms, state }) => [{ t: segs.map(([a, c]) => hm(a) + '-' + hm(c)).join('\n'), keep: true },
-      { t: dn(w.equipment) + (others(w).length ? '\n' + tx('with {0}', others(w).join(', ')) : ''), b: true, keep: true },
+  const span = ([a, c]) => fmtDate(a) + ' ' + hm(a) + ' - ' + (ymd(a) === ymd(c) ? '' : fmtDate(c) + ' ') + hm(c);
+  y = drawTable(doc, y, [{ h: 'Start - end', w: 31 }, { h: txAt('Equipment (one)', 'Equipment'), w: 25 }, { h: 'Type', w: 21 }, { h: 'Problem / task', w: 35 }, { h: 'Solution', w: 33 }, { h: 'Status', w: 21 }, { h: 'Duration', w: 21.9, align: 'right' }],
+    items.map(({ w, segs, ms, state }) => [{ t: segs.map(span).join('\n'), keep: true },
+      { t: dn(w.equipment), b: true, keep: true },
       { t: w.type }, { t: cut(w.problem, 200), keep: true }, { t: state === 'fixed' ? cut(w.solution, 200) : '-', keep: true }, { t: stLbl(state), keep: true },
       { t: fmtDur(ms), keep: true }]),
     { M, W, PH, C: { ink: C.ink, ink2: C.ink2, muted: C.muted, line: C.line, panel2: C.panel2 } });
@@ -2669,7 +2699,7 @@ function drawWork(jsPDF, list, o) {
     lf.forEach(([l, v], i) => { const y = 62 + i * 4; txt(l, L + 1, y, 9.5, 'normal', K.label); if (v) txt(v, L + 33, y, 9.5, 'normal'); });
     // right fields, with the frame on the left and bottom
     const rx = 117, vx = R - 1, top = 50.5;
-    const rows = [['Code:', '000000 - Maintenance'], ['Worker(s):', techs, true], ['Sender:', ''], ['Receiver:', ''], ['Start Date:', date(w.start)], ['Requisition Date:', date(w.createdAt || w.start)], ['Priority:', ''], ['Late:', ''], ['Classification:', ''], ['Execution Mode:', ''], ['Dep./Res.:', 'Maintenance / Technicien Maintenance'], ['Estimated Time:', '']];
+    const rows = [['Code:', '000000 - Maintenance'], ['Worker(s):', techs, true], ['Sender:', ''], ['Receiver:', ''], ['Start Date:', date(w.start) + ' ' + hm(w.start)], ['Requisition Date:', date(w.createdAt || w.start)], ['Priority:', ''], ['Late:', ''], ['Classification:', ''], ['Execution Mode:', ''], ['Dep./Res.:', 'Maintenance / Technicien Maintenance'], ['Estimated Time:', '']];
     let y = top;
     rows.forEach(([l, v, bold]) => {
       txt(l, rx, y, 9.5, bold ? 'bold' : 'normal', K.label);
@@ -2702,7 +2732,7 @@ function drawWork(jsPDF, list, o) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
     const dtm = t => date(t) + ' ' + hm(t);
     const notes = (w.notes ? doc.splitTextToSize(clean(w.notes), W - 2) : []).concat(w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty))
-      .concat(w.sessions.length > 1 || w.sessions.some(x => x.uid !== w.uid) ? w.sessions.map(x => 'Worked: ' + clean(sessName(x)) + '  ' + dtm(x.start) + ' - ' + (x.end ? dtm(x.end) : 'still on it')) : [])
+      .concat(w.sessions.map(x => 'Start ' + dtm(x.start) + '   End ' + (x.end ? dtm(x.end) : (w.status === 'parts' ? 'stopped, waiting for parts' : 'still on it')) + '   ' + clean(sessName(x)) + '  (' + hms(segMs(w, x.start, x.end || Date.now())) + ')'))
       .concat(w.waits.filter(x => (x.to || w.end || Date.now()) - x.from >= MIN).map(x => 'Waiting for parts ' + dtm(x.from) + ' - ' + (x.to ? dtm(x.to) : 'still waiting') + (x.to ? '  (' + hms(x.to - x.from) + ', not in duration)' : '')));
     const nLines = Math.max(3, notes.length);
     for (let i = 0; i < nLines; i++) { y += 8; if (notes[i]) txt(notes[i], L + 1, y - 1.4, 9.5, 'normal'); line(L, y, R, y); }
@@ -2716,7 +2746,7 @@ function drawWork(jsPDF, list, o) {
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
     });
     y += 16;
-    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.status === 'fixed' ? date(w.end) : ''], [L + 117, 34, 'Duration', w.status === 'fixed' ? hms(wDur(w)) : ''], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && w.status === 'fixed' ? hms(wSpan(w)) : '']];
+    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.status === 'fixed' ? date(w.end) : ''], [L + 117, 34, 'Duration', hms(wDur(w))], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && w.status === 'fixed' ? hms(wSpan(w)) : '']];
     c4.forEach(([x, wd, l, v]) => {
       if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
@@ -2760,6 +2790,7 @@ $('#shForm').addEventListener('submit', submitSheet);
 $('#jobForm').addEventListener('submit', saveJob);
 $('#jbClose').addEventListener('click', closeJob);
 $('#jbAddPart').addEventListener('click', addPart);
+$('#jbAddSess').addEventListener('click', addMyTime);
 $('#jbDelete').addEventListener('click', deleteJob);
 $('#jbPdf').addEventListener('click', e => { const w = S.work.find(x => x.id === JB.id); if (w) workPdf([w], { single: true }, e.currentTarget); });
 $('#jbStartNow').addEventListener('click', () => { $('#jb-start').value = toLocalInput(Date.now()); });
