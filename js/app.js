@@ -2189,7 +2189,7 @@ function normWork(id, d) {
   sessions.forEach(x => { if (!x.helpers) x.helpers = []; });
   return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, sessions, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Corrective' ? 'Breakdown' : WTYPES.includes(d.type) ? d.type : 'Other',
     status, waits,
-    problem: str(d.problem, 2000), diagnosis: str(d.diagnosis, 2000), solution: str(d.solution, 2000), notes: str(d.notes, 1000), bdMin: typeof d.bdMin === 'number' && d.bdMin >= 0 ? Math.round(d.bdMin) : null, parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
+    problem: str(d.problem, 2000), diagnosis: str(d.diagnosis, 2000), solution: str(d.solution, 2000), notes: str(d.notes, 1000), bd: d.bd === true, parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
     createdAt: typeof d.createdAt === 'number' ? d.createdAt : d.start, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0 };
 }
 function subWork(on) {
@@ -2348,7 +2348,7 @@ function openJob(id, finishing) {
   $('#jb-fix').value = w ? w.solution : '';
   $('#jb-diag').value = w ? w.diagnosis : '';
   $('#jb-notes').value = w ? w.notes : '';
-  $('#jb-bd').value = w && w.bdMin != null ? fmtHMin(w.bdMin) : '';
+  $('#jb-bd').checked = !!(w && w.bd);
   $('#jb-start').value = toLocalInput(w ? w.start : Date.now());
   $('#jb-end').value = w && w.end && !finishing ? toLocalInput(w.end) : (finishing ? toLocalInput(Date.now()) : '');
   rc($('#jbEqList'), equipChoices().map(n => h('option', { value: dn(n) })));
@@ -2442,17 +2442,6 @@ function addMyTime() {
   const r = $$('#jbSess .wt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus();
 }
 function addPart() { JB.parts.push({ no: '', desc: '', qty: 1 }); renderJob(); const r = $$('#jbParts .prt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus(); }
-/* breakdown time, typed by the technician: 1:30, 1h30, 1.5h or 90 (minutes). Empty is fine. */
-const fmtHMin = m => Math.floor(m / 60) + ':' + pad(m % 60);
-function parseBd(v) {
-  v = String(v || '').trim().toLowerCase().replace(',', '.');
-  if (!v) return null;
-  let m;
-  if ((m = /^(\d{1,3})\s*[:h]\s*(\d{1,2})?\s*(m|min)?$/.exec(v)) && +(m[2] || 0) < 60) return +m[1] * 60 + +(m[2] || 0);
-  if ((m = /^(\d+(?:\.\d+)?)\s*h$/.exec(v))) return Math.round(+m[1] * 60);
-  if ((m = /^(\d{1,4})\s*(m|min)?$/.exec(v))) return +m[1];
-  return NaN;
-}
 function jobFromForm() {
   const eq = $('#jb-eq').value.trim(), problem = $('#jb-problem').value.trim(), solution = $('#jb-fix').value.trim(), diagnosis = $('#jb-diag').value.trim(), notes = $('#jb-notes').value.trim();
   const useSess = !!JB.id && JB.sessions.length > 0;
@@ -2504,9 +2493,7 @@ function jobFromForm() {
   });
   waits = carveWaits(waits, sessions);
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
-  const bdMin = parseBd($('#jb-bd').value);
-  if (Number.isNaN(bdMin) || bdMin > 9999) throw 'Enter the breakdown time as h:mm, for example 1:30, or leave it empty.';
-  return { bdMin, equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end, waits, sessions };
+  return { bd: $('#jb-bd').checked, equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end, waits, sessions };
 }
 function saveJob(e) {
   e.preventDefault(); jbErr('');
@@ -2793,7 +2780,7 @@ function drawWork(jsPDF, list, o) {
     y += 16;
     // the date of the last work on it: the fixed date, or the last time someone worked on it
     const lastWork = segs[segs.length - 1][1];
-    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', date(lastWork)], [L + 117, 34, 'Duration', hms(v.ms)], [L + 159, 34, 'Breakdown Time', w.bdMin != null ? hms(w.bdMin * MIN) : '']];
+    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', date(lastWork)], [L + 117, 34, 'Duration', hms(v.ms)], [L + 159, 34, 'Breakdown Time', w.bd ? hms(segs[segs.length - 1][1] - segs[0][0]) : '']];
     c4.forEach(([x, wd, l, v]) => {
       if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
