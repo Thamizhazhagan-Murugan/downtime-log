@@ -6,7 +6,8 @@ It runs in any browser and installs on phones and tablets as an app (PWA). Every
 
 ## What it does
 
-- **Shift screen:** a live line state with its timer, one tile per machine, a timeline from the start of the shift, and downtime by cause.
+- **Dashboard:** a line card (state, cause, availability gauge, this shift's numbers and timeline) and one card per machine (state, alarm, mode, who logged it, and its stops and downtime this shift). Filter by down or running, or switch to a compact list. Live timers and each machine's history open when you tap the machine.
+- **Line check:** clocking in asks for the state of every machine once. Only changes are logged.
 - **Logging:** pick the machine, then what it is doing. For an Issue, pick the alarm from the machine's list, or pick Other and describe it. Every entry also records the machine mode: Auto, Semi-auto, Manual or Maintenance. Undo is available for a few seconds after each entry.
 - **Line rules:**
   - The **press** (main machine) sets the line state. Extrusion is running time. Every other press state is downtime.

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Extrusion Downtime Log</title>
 <meta name="description" content="Shift clock and downtime log for the extrusion line.">
-<meta name="theme-color" content="#eef1f7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eceef1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1114" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Downtime">
@@ -20,14 +20,19 @@
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
 </head>
 <body>
-<div class="bg" aria-hidden="true"></div>
+<aside class="side" aria-label="Main menu">
+  <div class="brand"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="var(--brand)"/><path d="M7 20h4l3-9 4 12 3-7h4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>Downtime</b><small>Extrusion line</small></span></div>
+  <nav class="tabs" aria-label="Sections">
+    <button class="tab" type="button" data-tab="shift" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</button>
+    <button class="tab" type="button" data-tab="analysis" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M6 16v-4M11 16V6M16 16v-7"/></svg>Analysis</button>
+    <button class="tab" type="button" data-tab="history" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>History</button>
+    <button class="tab" type="button" data-tab="admin" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 15h6M9 8h6M17 16h6"/></svg>Admin</button>
+  </nav>
+</aside>
 <header class="hmi">
   <div class="hmi-in">
     <div class="hmi-row">
-      <div class="ident">
-        <span class="ident-k">Extrusion line</span>
-        <h1 class="ident-t">Downtime</h1>
-      </div>
+      <div class="ident"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="var(--brand)"/><path d="M7 20h4l3-9 4 12 3-7h4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><h1 class="ident-t" id="pageTitle">Dashboard</h1></div>
       <div class="hmi-right">
         <span class="hmi-shift" id="hdrShift"></span>
         <span id="netChip" class="netchip" hidden></span>
@@ -35,12 +40,6 @@
         <button type="button" class="userbtn" id="userBtn" hidden></button>
       </div>
     </div>
-    <nav class="tabs" aria-label="Sections">
-      <button class="tab" type="button" data-tab="shift" aria-selected="true">Shift</button>
-      <button class="tab" type="button" data-tab="analysis" aria-selected="false">Analysis</button>
-      <button class="tab" type="button" data-tab="history" aria-selected="false">History</button>
-      <button class="tab" type="button" data-tab="admin" aria-selected="false" hidden>Admin</button>
-    </nav>
   </div>
 </header>
 
@@ -68,28 +67,24 @@
     <div id="shiftLoading" class="empty"><p class="empty-t">Loading the shared log…</p><p class="empty-s">The line state, machine tiles and shift timeline appear here.</p></div>
     <div id="shiftBody" class="panelset" hidden>
       <div id="clockStrip" class="clockstrip" hidden><span>You are not clocked in</span><button type="button" class="btn btn-primary" id="clockInBtn">Clock in</button></div>
-      <section class="hero" id="hero" aria-live="polite">
-        <div class="hero-top"><span class="hero-k" id="heroKicker"></span></div>
-        <div>
-          <div class="hero-state"><span class="hero-dot" aria-hidden="true"></span><span id="heroState"></span></div>
-          <p class="hero-cause" id="heroCause"></p>
+      <section class="card lcard" id="hero" aria-labelledby="lineTitle">
+        <div class="card-h">
+          <div class="card-t"><h2 id="lineTitle">Extrusion line</h2><span class="rtag" id="lineTag"></span></div>
+          <span class="spill" id="linePill" role="status" aria-live="polite"></span>
         </div>
-        <div class="hero-act" id="heroAct"></div>
+        <div class="lc-b">
+          <div class="dbox gbox" id="lineGauge"></div>
+          <div class="col"><p class="col-t">Line info</p><div class="irows" id="lineInfo"></div></div>
+          <div class="dbox"><p class="col-t">This shift</p><div class="dtiles" id="lineData"></div></div>
+        </div>
+        <div class="tl" id="shiftTl"></div>
         <div class="hero-watch" id="heroWatch"></div>
+        <div class="lc-foot"><div class="hero-act" id="heroAct"></div><button type="button" class="btn" id="reportBtn">Shift report PDF</button></div>
       </section>
 
       <section class="blk" aria-labelledby="tilesTitle">
-        <div class="blk-h"><h3 class="blk-t" id="tilesTitle">Machines</h3><span class="panel-sub">Tap one to log</span></div>
-        <div class="tiles" id="tiles"></div>
-      </section>
-
-      <section class="panel" aria-labelledby="shiftTitle">
-        <div class="panel-head">
-          <div><h3 id="shiftTitle">Shift</h3><p class="panel-sub" id="shiftSub"></p></div>
-          <button type="button" class="btn btn-sm" id="reportBtn">Report PDF</button>
-        </div>
-        <div class="kpis k3" id="shiftKpis"></div>
-        <div class="tl" id="shiftTl"></div>
+        <div class="blk-h"><h3 class="blk-t" id="tilesTitle">Machines</h3><div class="mtools" id="mTools"></div></div>
+        <div class="mcards" id="tiles"></div>
       </section>
 
     </div>
@@ -193,7 +188,7 @@
 </main>
 
 <nav class="bnav" aria-label="Sections">
-  <button class="bn" type="button" data-tab="shift" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 2h5"/></svg>Shift</button>
+  <button class="bn" type="button" data-tab="shift" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</button>
   <button class="bn" type="button" data-tab="analysis" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M6 16v-4M11 16V6M16 16v-7"/></svg>Analysis</button>
   <button class="bn" type="button" data-tab="history" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>History</button>
   <button class="bn" type="button" data-tab="admin" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 15h6M9 8h6M17 16h6"/></svg>Admin</button>

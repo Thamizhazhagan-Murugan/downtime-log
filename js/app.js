@@ -180,7 +180,7 @@ const RANGES = [
   { id: '30d', label: '30 days', days: 30 }, { id: '90d', label: '90 days', days: 90 }
 ];
 const S = {
-  tab: 'shift', arange: LS.get('arange', '7d'), hrange: LS.get('hrange', 'shift'), hmachine: '',
+  tab: 'shift', mview: LS.get('mview', 'grid'), mfilter: LS.get('mfilter', 'all'), arange: LS.get('arange', '7d'), hrange: LS.get('hrange', 'shift'), hmachine: '',
   conn: 'connecting', db: null, auth: null, fbUser: null, me: null, meLoaded: false, unsubMe: null,
   config: normalizeConfig(null),
   live: [], liveSince: 0, liveLoaded: false, liveSeeds: {}, liveSeedsLoaded: false, unsubLive: null, pending: 0,
@@ -778,6 +778,8 @@ function applyTab() {
   if (S.tab === 'admin' && !admin) S.tab = 'shift';
   $$('.tab, .bn').forEach(b => { b.hidden = b.dataset.tab === 'admin' && !admin; b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)); });
   $('.tabs').hidden = gated; $('.bnav').hidden = gated;
+  document.body.classList.toggle('gated', gated);
+  $('#pageTitle').textContent = gated ? 'Downtime' : ({ shift: 'Dashboard', analysis: 'Analysis', history: 'History', admin: 'Admin' })[S.tab];
   $('.bnav').style.gridTemplateColumns = 'repeat(' + (admin ? 4 : 3) + ',minmax(0,1fr))';
   $$('[data-panel]').forEach(p => { p.hidden = gated || p.dataset.panel !== S.tab; });
   subSessions(!gated && admin && S.tab === 'admin');
@@ -785,7 +787,8 @@ function applyTab() {
 function renderHeader(L) {
   const st = $('#lineState'); st.className = 'state';
   const sb = shiftBounds(Date.now());
-  $('#hdrShift').textContent = sb.name + ' shift · ' + hm(sb.start) + '–' + hm(sb.end);
+  rc($('#hdrShift'), h('span', { class: 'hc' }, ico('clock'), h('span', null, h('small', null, 'Shift'), h('b', null, sb.name + ' · ' + hm(sb.start) + '–' + hm(sb.end)))),
+    h('span', { class: 'hc' }, ico('cal'), h('span', null, h('small', null, 'Date'), h('b', null, new Date(sb.start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })))));
   const ub = $('#userBtn');
   ub.hidden = !S.fbUser || gateMode() !== 'none';
   if (!ub.hidden) {
@@ -849,7 +852,7 @@ function renderShift(L) {
   load.hidden = true; body.hidden = false;
   const strip = $('#clockStrip');
   strip.hidden = S.conn !== 'live' || !!S.session;
-  renderHero(L); renderTiles(L); renderShiftPanel(L);
+  renderHero(L); renderMachines(L);
 }
 const lockOut = () => !canLog() || useExample();
 function actBtn(label, cls, fn) { return h('button', { type: 'button', class: cls, disabled: lockOut(), onclick: e => fn(e.currentTarget) }, label); }
@@ -857,16 +860,25 @@ function backBtn(m, cls) { const t = runStateOf(m); return actBtn(m + ' back to 
 function renderHero(L) {
   const line = L.R.line, now = L.now, P = primary();
   const kind = line.run === true ? 'run' : line.run === false ? 'down' : 'unk';
-  const hero = $('#hero');
-  hero.className = 'hero is-' + kind;
-  hero.style.setProperty('--hc', kind === 'run' ? 'var(--run)' : kind === 'down' ? 'var(--down)' : 'var(--axis)');
-  $('#heroKicker').textContent = kind === 'run' ? 'Line running' : kind === 'down' ? 'Line down' : 'Clock not started';
-  $('#heroState').textContent = kind === 'unk' ? 'Not logged yet' : line.group ? line.group.name + ' ' + line.state.toLowerCase() : (kind === 'down' && line.machine !== P) ? line.machine + ' ' + line.state.toLowerCase() : line.state;
-  const cause = $('#heroCause');
-  if (kind === 'unk') cause.textContent = 'Log what the ' + P.toLowerCase() + ' is doing to start the shift clock.';
-  else if (line.group) rc(cause, h('b', null, andList(line.group.members)), ' all down for more than ' + line.group.delay + ' min');
-  else if (kind === 'run') cause.textContent = line.mode && line.mode !== 'Auto' ? line.mode : '';
-  else rc(cause, [line.ev && line.ev.alarm === OTHER ? line.ev.note : line.ev && line.ev.alarm, line.ev && line.ev.stop ? 'press stopped' : ''].filter(Boolean).join(' · '));
+  const hero = $('#hero'), st = L.st, shift = L.shift;
+  hero.className = 'card lcard is-' + kind;
+  $('#lineTag').textContent = shift.name + ' shift · ' + hm(shift.start) + '–' + hm(shift.end);
+  const stateTxt = kind === 'unk' ? 'Not logged yet' : line.group ? line.group.name + ' ' + line.state.toLowerCase() : (kind === 'down' && line.machine !== P) ? line.machine + ' ' + line.state.toLowerCase() : line.state;
+  const alarmTxt = line.group ? andList(line.group.members) + ' down together' : [line.ev && line.ev.alarm === OTHER ? line.ev.note : line.ev && line.ev.alarm, line.ev && line.ev.stop ? 'press stopped' : ''].filter(Boolean).join(' · ');
+  setPill($('#linePill'), kind === 'run' ? 'run' : kind === 'down' ? 'down' : 'unk', kind === 'run' ? 'Running' : kind === 'down' ? 'Down · ' + (line.group ? line.group.name : line.machine) : 'Not started');
+  rc($('#lineGauge'), h('p', { class: 'col-t' }, 'Productivity'), gaugeEl(st.avail, 'Availability'));
+  rc($('#lineInfo'),
+    irow('state', 'Line state', stateTxt),
+    irow('alarm', kind === 'down' ? 'Cause' : 'Alarm', kind === 'down' ? alarmTxt || line.machine : '—'),
+    irow('mode', 'Mode', (line.mode || (kind === 'unk' ? '—' : 'Not set'))),
+    irow('user', 'Last entry by', line.ev && !line.group ? whoText(line.ev) || '—' : '—'));
+  const r = hmParts(st.run), d = hmParts(st.down), top = st.causes[0];
+  rc($('#lineData'),
+    dtile('run', 'Running', r[0] + ' ' + r[1]),
+    dtile('down', 'Downtime', d[0] + ' ' + d[1]),
+    dtile('stops', 'Stops', String(st.stops)),
+    dtile('cause', 'Biggest cause', top ? top.state + ' · ' + top.machine : '—'));
+  renderTimeline($('#shiftTl'), L.RS.segs, shift.start, shift.end, now);
   const btns = [];
   if (useExample()) btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(P) }, 'Start the real clock'));
   else if (kind === 'down') {
@@ -914,17 +926,102 @@ function renderWatch(L) {
   }
   rc($('#heroWatch'), items);
 }
-function renderTiles(L) {
+const ICON = {
+  state: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  alarm: '<path d="M12 4 2.5 20h19L12 4z"/><path d="M12 10v4.5M12 17.5h.01"/>',
+  mode: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c1.4-3.6 4.3-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/>',
+  run: '<circle cx="12" cy="12" r="9"/><path d="m10 8.5 5.5 3.5-5.5 3.5z"/>',
+  down: '<path d="M7 3h10M7 21h10M8 3v3.5l4 5.5-4 5.5V21M16 3v3.5L12 12l4 5.5V21"/>',
+  stops: '<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>',
+  cause: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".6" fill="currentColor"/>',
+  bell: '<path d="M6 16V10a6 6 0 0 1 12 0v6l1.5 2h-15L6 16z"/><path d="M10 21h4"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>',
+  filter: '<path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  cal: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'
+};
+function ico(k) { const sp = document.createElement('span'); sp.className = 'ico'; sp.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON[k] + '</svg>'; return sp; }
+const irow = (k, label, value) => h('div', { class: 'irow' }, ico(k), h('span', null, label, h('b', null, value)));
+const dtile = (k, label, value) => h('div', { class: 'dtile' }, ico(k), h('span', null, label, h('b', null, value)));
+function setPill(el, k, text) { el.className = 'spill k-' + k; rc(el, h('i'), text); }
+function gaugeEl(p, label) {
+  const r = 52, c = 2 * Math.PI * r, arc = c * 0.75, v = p == null ? 0 : Math.max(0, Math.min(1, p));
+  const box = h('div', { class: 'gauge', role: 'img', 'aria-label': label + ' ' + (p == null ? 'not available yet' : Math.round(v * 100) + '%') });
+  box.innerHTML = '<svg viewBox="0 0 140 140" aria-hidden="true"><circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + arc.toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(135 70 70)"/>' +
+    (v > 0 ? '<circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--run)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + (arc * v).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(135 70 70)"/>' : '') + '</svg>';
+  box.append(h('div', { class: 'g-v' }, h('b', null, p == null ? '–' : Math.round(v * 100) + '%'), h('small', null, label)));
+  return box;
+}
+/* simple line drawings of each machine type */
+const ART = {
+  press: '<rect x="14" y="94" width="172" height="8" rx="3"/><rect x="24" y="34" width="34" height="60" rx="4"/><rect x="142" y="34" width="36" height="60" rx="4"/><path d="M58 44h84M58 84h84"/><rect x="70" y="52" width="34" height="24" rx="5" class="f"/><rect x="108" y="56" width="34" height="16" rx="3"/><path d="M58 64h12"/>',
+  feed: '<path d="M10 82h180"/><circle cx="24" cy="88" r="6"/><circle cx="52" cy="88" r="6"/><circle cx="80" cy="88" r="6"/><circle cx="108" cy="88" r="6"/><circle cx="136" cy="88" r="6"/><circle cx="164" cy="88" r="6"/><rect x="16" y="64" width="46" height="16" rx="8" class="f"/><rect x="70" y="64" width="46" height="16" rx="8" class="f"/><rect x="124" y="64" width="46" height="16" rx="8" class="f"/><path d="M150 38h36v26h-36z"/>',
+  puller: '<path d="M8 90h184M8 98h184"/><path d="M8 62h76" stroke-width="5"/><rect x="80" y="40" width="58" height="42" rx="8" class="f"/><path d="M84 56h10M84 68h10"/><circle cx="94" cy="90" r="6"/><circle cx="126" cy="90" r="6"/><path d="M138 52h30v20h-30"/>',
+  stretcher: '<path d="M8 96h184"/><rect x="16" y="40" width="40" height="52" rx="6" class="f"/><rect x="144" y="40" width="40" height="52" rx="6" class="f"/><path d="M56 66h88" stroke-width="5"/><path d="M78 52l-10 0M68 52l5-4M68 52l5 4M122 52h10M132 52l-5-4M132 52l-5 4"/>',
+  table: '<path d="M14 62h172l-10 14H24z" class="f"/><path d="M30 76v24M100 76v24M170 76v24"/><path d="M26 54h150M32 46h140M38 38h128" stroke-width="3"/><circle cx="56" cy="88" r="6"/><circle cx="144" cy="88" r="6"/>',
+  other: '<rect x="40" y="36" width="120" height="58" rx="8" class="f"/><path d="M20 100h160"/><circle cx="100" cy="65" r="14"/><path d="M100 45v6M100 79v6M80 65h6M114 65h6"/>'
+};
+function artKind(n) { n = n.toLowerCase(); return /press/.test(n) ? 'press' : /feed|billet|furnace|log/.test(n) ? 'feed' : /pull/.test(n) ? 'puller' : /stretch/.test(n) ? 'stretcher' : /zpe|table|cool|saw|stack|run.?out/.test(n) ? 'table' : 'other'; }
+function artEl(name, k) { const d = h('div', { class: 'art k-' + k }); d.innerHTML = '<svg viewBox="0 0 200 120" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ART[artKind(name)] + '</svg>'; return d; }
+function mStatus(m, e, line) {
+  if (!e) return { k: 'unk', label: 'Not logged' };
+  if (e.run) return { k: 'run', label: 'Running' };
+  const causing = m.main || line.machine === m.name || (line.group && line.group.members.includes(m.name));
+  return causing ? { k: 'down', label: 'Down · ' + e.state } : { k: 'warn', label: 'Issue · line running' };
+}
+function ruleText(m) { const g = m.rule === 'group' ? groupOf(m.name) : null; return m.main ? 'Main machine' : g ? g.name + ' pair' : m.rule === 'optional' ? 'Line keeps running' : 'Stops the line'; }
+function machineShift(L, m) {
+  const g = m.rule === 'group' ? groupOf(m.name) : null, keys = g ? [m.name, g.name] : [m.name];
+  const cs = L.st.causes.filter(c => keys.includes(c.machine));
+  const evs = L.D.events.filter(e => e.machine === m.name && !e.run && e.at >= L.shift.start && e.at <= L.now);
+  const al = {}; evs.forEach(e => { const a = e.alarm === OTHER ? (e.note || OTHER) : (e.alarm || e.state); al[a] = (al[a] || 0) + 1; });
+  const top = Object.entries(al).sort((a, b) => b[1] - a[1])[0];
+  return { ms: cs.reduce((a, c) => a + c.ms, 0), stops: cs.reduce((a, c) => a + c.n, 0), issues: evs.length, top: top ? top[0] : '—' };
+}
+function renderMachines(L) {
   const line = L.R.line;
-  $('#tiles').replaceChildren(...machines().map(m => {
-    const e = L.R.state[m.name] || null; const run = e ? e.run : null;
-    const causing = e && !run && (m.main || line.machine === m.name || (line.group && line.group.members.includes(m.name)));
-    const cls = !e || run ? '' : causing ? ' down' : ' warn';
-    const color = run === true ? 'var(--run)' : !e ? 'var(--axis)' : causing ? 'var(--down)' : 'var(--warn)';
-    return h('button', { type: 'button', class: 'mtile' + cls, onclick: () => openSheet(m.name), 'aria-label': m.name + ': ' + (e ? e.state + (e.alarm ? ', ' + e.alarm : '') : 'not logged') + '. Log a change.' },
-      h('span', { class: 'mt-name' }, m.name),
-      h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), h('span', null, e ? (e.alarm && !run ? e.alarm : e.state) : 'Not logged')));
-  }));
+  const all = machines().map(m => { const e = L.R.state[m.name] || null; return { m, e, st: mStatus(m, e, line) }; });
+  const isDown = x => x.st.k === 'down' || x.st.k === 'warn';
+  const n = { all: all.length, down: all.filter(isDown).length, run: all.filter(x => x.st.k === 'run').length };
+  const view = S.mview === 'list' ? 'list' : 'grid', f = ['all', 'down', 'run'].includes(S.mfilter) ? S.mfilter : 'all';
+  const vbtn = (v, label) => h('button', { type: 'button', class: 'vbtn', 'aria-pressed': String(view === v), 'aria-label': label + ' view', onclick: () => { S.mview = v; LS.set('mview', v); renderAll(); } }, ico(v), v === 'grid' ? label : null);
+  const fbtn = (v, label) => h('button', { type: 'button', class: 'fpill', 'aria-pressed': String(f === v), onclick: () => { S.mfilter = v; LS.set('mfilter', v); renderAll(); } }, ico('filter'), label, h('small', null, String(n[v])));
+  rc($('#mTools'), h('div', { class: 'vtoggle', role: 'group', 'aria-label': 'View' }, vbtn('grid', 'Grid'), vbtn('list', 'List')),
+    h('div', { class: 'fpills', role: 'group', 'aria-label': 'Show' }, fbtn('all', 'All machines'), fbtn('down', 'Down'), fbtn('run', 'Running')));
+  const list = all.filter(x => f === 'all' || (f === 'down' ? isDown(x) : x.st.k === 'run'));
+  const box = $('#tiles');
+  box.className = view === 'list' ? 'tiles' : 'mcards';
+  if (!list.length) { rc(box, h('p', { class: 'muted empty-line' }, f === 'down' ? 'No machine is down right now.' : 'No machine is running right now.')); return; }
+  rc(box, list.map(x => view === 'list' ? tileEl(x) : cardEl(x, L)));
+}
+function tileEl({ m, e, st }) {
+  const color = st.k === 'run' ? 'var(--run)' : st.k === 'down' ? 'var(--down)' : st.k === 'warn' ? 'var(--warn)' : 'var(--axis)';
+  return h('button', { type: 'button', class: 'mtile k-' + st.k, onclick: () => openSheet(m.name), 'aria-label': m.name + ': ' + (e ? e.state + (e.alarm ? ', ' + e.alarm : '') : 'not logged') + '. Open.' },
+    h('span', { class: 'mt-name' }, m.name),
+    h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), h('span', null, e ? (e.alarm && !e.run ? e.alarm : e.state) : 'Not logged')));
+}
+function cardEl({ m, e, st }, L) {
+  const ms = machineShift(L, m), d = hmParts(ms.ms);
+  const pill = h('span'); setPill(pill, st.k, st.label);
+  return h('article', { class: 'card mc k-' + st.k, onclick: ev => { if (!ev.target.closest('button')) openSheet(m.name); } },
+    h('div', { class: 'card-h' },
+      h('div', { class: 'card-t' }, h('h3', null, m.name), h('span', { class: 'rtag' }, ruleText(m))),
+      pill,
+      h('button', { type: 'button', class: 'btn btn-sm', onclick: () => openSheet(m.name) }, 'Open')),
+    h('div', { class: 'mc-b' },
+      artEl(m.name, st.k),
+      h('div', { class: 'col' }, h('p', { class: 'col-t' }, 'Machine info'), h('div', { class: 'irows' },
+        irow('state', 'State', e ? e.state : 'Not logged'),
+        irow('alarm', 'Alarm', e && !e.run ? ((e.alarm === OTHER ? e.note : e.alarm) || '—') : '—'),
+        irow('mode', 'Mode', e ? (e.mode || 'Not set') : '—'),
+        irow('user', 'Logged by', e ? whoText(e) || '—' : '—'))),
+      h('div', { class: 'dbox' }, h('p', { class: 'col-t' }, 'This shift'), h('div', { class: 'dtiles' },
+        dtile('stops', 'Line stops', String(ms.stops)),
+        dtile('down', 'Line downtime', d[0] + ' ' + d[1]),
+        dtile('bell', 'Issues logged', String(ms.issues)),
+        dtile('alarm', 'Most common', ms.top)))));
 }
 function kpiEl(l, v, u, s, meter) {
   return h('div', { class: 'kpi' }, h('span', { class: 'kpi-l' }, l), h('span', { class: 'kpi-v' }, v, u ? h('small', null, u) : null),
@@ -933,17 +1030,6 @@ function kpiEl(l, v, u, s, meter) {
 }
 function hmParts(ms) { const m = Math.max(0, Math.round(ms / MIN)); return m < 60 ? [String(m), 'min'] : [Math.floor(m / 60) + ':' + pad(m % 60), 'h']; }
 const causeLabel = c => c.machine + ' · ' + c.state;
-function renderShiftPanel(L) {
-  const { shift, st, now } = L;
-  $('#shiftTitle').textContent = shift.name + ' shift';
-  $('#shiftSub').textContent = hm(shift.start) + '–' + hm(shift.end) + ' · ' + fmtDur(Math.max(0, shift.end - now)) + ' to go';
-  const r = hmParts(st.run), d = hmParts(st.down);
-  rc($('#shiftKpis'),
-    kpiEl('Running', r[0], r[1]),
-    kpiEl('Down', d[0], d[1], st.causes[0] ? 'Most: ' + st.causes[0].state : null),
-    kpiEl('Availability', st.avail == null ? '–' : String(Math.round(st.avail * 100)), st.avail == null ? '' : '%', null, st.avail));
-  renderTimeline($('#shiftTl'), L.RS.segs, shift.start, shift.end, now);
-}
 function segTip(s) {
   const head = s.run === true ? 'Running' : s.run == null ? 'Not logged' : 'Downtime';
   const extra = [s.alarm, s.note].filter(Boolean).join(' · ');
