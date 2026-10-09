@@ -180,7 +180,7 @@ const RANGES = [
   { id: '30d', label: '30 days', days: 30 }, { id: '90d', label: '90 days', days: 90 }
 ];
 const S = {
-  tab: 'shift', mview: LS.get('mview', 'grid'), mfilter: LS.get('mfilter', 'all'), arange: LS.get('arange', '7d'), hrange: LS.get('hrange', 'shift'), hmachine: '',
+  tab: 'shift', tlSel: {}, afocus: null, abucket: null, mview: LS.get('mview', 'grid'), mfilter: LS.get('mfilter', 'all'), arange: LS.get('arange', '7d'), hrange: LS.get('hrange', 'shift'), hmachine: '',
   conn: 'connecting', db: null, auth: null, fbUser: null, me: null, meLoaded: false, unsubMe: null,
   config: normalizeConfig(null),
   live: [], liveSince: 0, liveLoaded: false, liveSeeds: {}, liveSeedsLoaded: false, unsubLive: null, pending: 0,
@@ -866,6 +866,7 @@ function renderHero(L) {
   const stateTxt = kind === 'unk' ? 'Not logged yet' : line.group ? line.group.name + ' ' + line.state.toLowerCase() : (kind === 'down' && line.machine !== P) ? line.machine + ' ' + line.state.toLowerCase() : line.state;
   const alarmTxt = line.group ? andList(line.group.members) + ' down together' : [line.ev && line.ev.alarm === OTHER ? line.ev.note : line.ev && line.ev.alarm, line.ev && line.ev.stop ? 'press stopped' : ''].filter(Boolean).join(' · ');
   setPill($('#linePill'), kind === 'run' ? 'run' : kind === 'down' ? 'down' : 'unk', kind === 'run' ? 'Running' : kind === 'down' ? 'Down · ' + (line.group ? line.group.name : line.machine) : 'Not started');
+  gaugeEl.tip = 'Availability ' + (st.avail == null ? '–' : Math.round(st.avail * 100) + '%') + '\nRunning: ' + fmtDur(st.run) + '\nDowntime: ' + fmtDur(st.down) + (st.unk >= MIN ? '\nNot logged: ' + fmtDur(st.unk) : '') + '\nRunning ÷ (running + downtime)';
   rc($('#lineGauge'), h('p', { class: 'col-t' }, 'Productivity'), gaugeEl(st.avail, 'Availability'));
   rc($('#lineInfo'),
     irow('state', 'Line state', stateTxt),
@@ -873,12 +874,16 @@ function renderHero(L) {
     irow('mode', 'Mode', (line.mode || (kind === 'unk' ? '—' : 'Not set'))),
     irow('user', 'Last entry by', line.ev && !line.group ? whoText(line.ev) || '—' : '—'));
   const r = hmParts(st.run), d = hmParts(st.down), top = st.causes[0];
+  const topTip = st.causes.slice(0, 5).map(c => '\n' + fmtDur(c.ms) + '  ' + c.state + ' · ' + c.machine).join('');
+  const tipT = (el, t) => { el.setAttribute('data-tip', t); el.tabIndex = 0; return el; };
+  const causeT = dtile('cause', 'Biggest cause', top ? top.state + ' · ' + top.machine : '—');
+  if (top) { causeT.classList.add('go'); causeT.setAttribute('role', 'button'); causeT.setAttribute('aria-label', 'Biggest cause: ' + top.state + ' on the ' + top.machine + '. Open it in Analysis.'); causeT.onclick = () => { S.arange = 'shift'; S.afocus = top.key; S.abucket = null; tipHide(); setTab('analysis'); }; causeT.onkeydown = keyPress; }
   rc($('#lineData'),
-    dtile('run', 'Running', r[0] + ' ' + r[1]),
-    dtile('down', 'Downtime', d[0] + ' ' + d[1]),
-    dtile('stops', 'Stops', String(st.stops)),
-    dtile('cause', 'Biggest cause', top ? top.state + ' · ' + top.machine : '—'));
-  renderTimeline($('#shiftTl'), L.RS.segs, shift.start, shift.end, now);
+    tipT(dtile('run', 'Running', r[0] + ' ' + r[1]), 'Running ' + fmtDur(st.run) + '\nExtrusion time this shift'),
+    tipT(dtile('down', 'Downtime', d[0] + ' ' + d[1]), 'Downtime ' + fmtDur(st.down) + (topTip || '\nNo downtime yet')),
+    tipT(dtile('stops', 'Stops', String(st.stops)), plural(st.stops, 'stop') + ' this shift' + st.causes.slice(0, 5).map(c => '\n' + c.n + '×  ' + c.state + ' · ' + c.machine).join('')),
+    top ? tipT(causeT, top.state + ' · ' + top.machine + '\n' + fmtDur(top.ms) + ', ' + plural(top.n, 'stop') + '\nTap to open it in Analysis') : causeT);
+  renderTimeline($('#shiftTl'), L.RS.segs, shift.start, shift.end, now, { key: 'line' });
   const btns = [];
   if (useExample()) btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(P) }, 'Start the real clock'));
   else if (kind === 'down') {
@@ -948,9 +953,11 @@ const dtile = (k, label, value) => h('div', { class: 'dtile' }, ico(k), h('span'
 function setPill(el, k, text) { el.className = 'spill k-' + k; rc(el, h('i'), text); }
 function gaugeEl(p, label) {
   const r = 52, c = 2 * Math.PI * r, arc = c * 0.75, v = p == null ? 0 : Math.max(0, Math.min(1, p));
-  const box = h('div', { class: 'gauge', role: 'img', 'aria-label': label + ' ' + (p == null ? 'not available yet' : Math.round(v * 100) + '%') });
+  const pctTxt = p == null ? '–' : Math.round(v * 100) + '%';
+  const box = h('div', { class: 'gauge' + (gaugeEl.last !== pctTxt ? ' anim' : ''), role: 'img', tabindex: '0', 'aria-label': label + ' ' + (p == null ? 'not available yet' : pctTxt), 'data-tip': gaugeEl.tip || (label + ' ' + pctTxt) });
+  gaugeEl.last = pctTxt;
   box.innerHTML = '<svg viewBox="0 0 140 140" aria-hidden="true"><circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + arc.toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(135 70 70)"/>' +
-    (v > 0 ? '<circle cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--run)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + (arc * v).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(135 70 70)"/>' : '') + '</svg>';
+    (v > 0 ? '<circle class="g-arc" cx="70" cy="70" r="' + r + '" fill="none" stroke="var(--run)" stroke-width="12" stroke-linecap="round" stroke-dasharray="' + (arc * v).toFixed(1) + ' ' + c.toFixed(1) + '" style="--len:' + (arc * v).toFixed(1) + '" transform="rotate(135 70 70)"/>' : '') + '</svg>';
   box.append(h('div', { class: 'g-v' }, h('b', null, p == null ? '–' : Math.round(v * 100) + '%'), h('small', null, label)));
   return box;
 }
@@ -1035,21 +1042,50 @@ function segTip(s) {
   const extra = [s.alarm, s.note].filter(Boolean).join(' · ');
   return head + (s.machine ? ': ' + s.machine + ' · ' + s.state : '') + (s.mode ? ' (' + s.mode + ')' : '') + '\n' + hm(s.start) + '–' + hm(s.end) + ' · ' + fmtDur(s.end - s.start) + (extra ? '\n' + extra : '');
 }
-function renderTimeline(box, segs, from, to, now) {
-  const span = Math.max(1, to - from), pct = t => Math.max(0, Math.min(100, (t - from) / span * 100));
-  const els = segs.filter(s => s.end > from && s.start < to).map(s => {
-    const a = pct(s.start), b = pct(Math.min(s.end, now)), col = segColor(s);
-    return h('div', { class: 'tl-seg' + (col ? '' : ' unk'), style: 'left:' + a.toFixed(3) + '%;width:' + Math.max(0.12, b - a).toFixed(3) + '%' + (col ? ';background:' + col : ''), 'data-tip': segTip(s) });
+/* Timeline: hover shows a crosshair with the time and the block under it; tap or click a block to pin its details. */
+function renderTimeline(box, segs, from, to, now, opts) {
+  opts = opts || {};
+  const key = opts.key || box.id, span = Math.max(1, to - from), pct = t => Math.max(0, Math.min(100, (t - from) / span * 100));
+  const vis = segs.filter(s => s.end > from && s.start < to);
+  const selKey = S.tlSel[key];
+  const sel = selKey ? vis.find(s => s.start + '|' + (s.machine || '') === selKey) : null;
+  if (selKey && !sel) delete S.tlSel[key];
+  const els = vis.map(s => {
+    const a = pct(s.start), b = pct(Math.min(s.end, now)), col = segColor(s), id = s.start + '|' + (s.machine || '');
+    return h('div', { class: 'tl-seg' + (col ? '' : ' unk') + (sel ? (sel === s ? ' sel' : ' dim') : ''), tabindex: '0', role: 'button', 'aria-pressed': String(sel === s),
+      style: 'left:' + a.toFixed(3) + '%;width:' + Math.max(0.12, b - a).toFixed(3) + '%' + (col ? ';background:' + col : ''), 'data-tip': segTip(s),
+      onclick: () => { tipHide(); if (S.tlSel[key] === id) delete S.tlSel[key]; else S.tlSel[key] = id; renderTimeline(box, segs, from, to, now, opts); if (opts.onPick) opts.onPick(S.tlSel[key] ? s : null); },
+      onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } } });
   });
   const nowP = pct(now);
   const ticks = [], spanH = span / HOUR, stepH = spanH <= 8 ? 1 : spanH <= 14 ? 2 : spanH <= 26 ? 4 : 12;
   const t0 = new Date(from); t0.setMinutes(0, 0, 0); let t = +t0; if (t < from) t += HOUR;
   while (t <= to) { if (new Date(t).getHours() % stepH === 0) ticks.push(t); t += HOUR; }
   const xs = uniq([from, ...ticks]).map((x, i, arr) => h('span', { class: [x === from ? 'first' : '', i === arr.length - 1 && pct(x) > 96 ? 'last' : '', i % 2 ? 'alt' : ''].filter(Boolean).join(' ') || null, style: 'left:' + pct(x).toFixed(3) + '%' }, hm(x)));
-  rc(box,
-    h('div', { class: 'tl-wrap' }, h('div', { class: 'tl-bar' }, els, nowP < 100 ? h('div', { class: 'tl-future', style: 'left:' + nowP.toFixed(3) + '%' }) : null),
-      nowP < 100 ? h('div', { class: 'tl-now', style: 'left:' + nowP.toFixed(3) + '%', 'data-tip': 'Now ' + hm(now) }) : null),
-    h('div', { class: 'tl-x' }, xs));
+  const hair = h('div', { class: 'tl-hair', hidden: true }, h('span'));
+  const wrap = h('div', { class: 'tl-wrap' }, h('div', { class: 'tl-bar' }, els, nowP < 100 ? h('div', { class: 'tl-future', style: 'left:' + nowP.toFixed(3) + '%' }) : null),
+    nowP < 100 ? h('div', { class: 'tl-now', style: 'left:' + nowP.toFixed(3) + '%' }) : null, hair);
+  wrap.addEventListener('pointermove', e => {
+    if (e.pointerType === 'touch') return;
+    const r = wrap.getBoundingClientRect(), x = Math.max(0, Math.min(r.width, e.clientX - r.left)), tt = from + x / r.width * span;
+    hair.hidden = false; hair.style.left = x + 'px'; hair.firstChild.textContent = hm(Math.min(tt, to));
+  });
+  wrap.addEventListener('pointerleave', () => { hair.hidden = true; });
+  const kids = [wrap, h('div', { class: 'tl-x' }, xs)];
+  if (sel) {
+    const col = segColor(sel) || 'var(--axis)', end = Math.min(sel.end, now);
+    const what = sel.run === true ? (sel.machine ? sel.machine + ' · ' + sel.state : 'Running') : sel.run == null ? 'Not logged' : (sel.group ? sel.group + ' ' + (sel.state || '').toLowerCase() : sel.machine + ' · ' + sel.state);
+    const extra = [sel.alarm === OTHER ? sel.note : sel.alarm, sel.alarm === OTHER ? '' : sel.note, sel.mode && sel.mode !== 'Auto' ? sel.mode : ''].filter(Boolean).join(' · ');
+    const who = sel.personName || (sel.uid ? nameOf(sel.uid) : '');
+    const canOpen = opts.open !== false && sel.run != null && (sel.machine || sel.group);
+    kids.push(h('div', { class: 'tl-detail', style: '--c:' + col },
+      h('i'),
+      h('div', { class: 'tld-t' }, h('b', null, what), h('span', null, hm(sel.start) + '–' + (sel.end >= now ? 'now' : hm(end)) + ' · ' + fmtDur(end - sel.start) + (extra ? ' · ' + extra : '') + (who ? ' · logged by ' + who : ''))),
+      h('div', { class: 'tld-a' },
+        canOpen ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { const g = sel.group ? groupsCfg().find(x => x.name === sel.group) : null; if (g) openSheet(null, g); else openSheet(sel.machine); } }, 'Open ' + (sel.group || sel.machine)) : null,
+        h('button', { type: 'button', class: 'x', 'aria-label': 'Close details', onclick: () => { tipHide(); delete S.tlSel[key]; renderTimeline(box, segs, from, to, now, opts); if (opts.onPick) opts.onPick(null); } }, '×'))));
+  }
+  rc(box, kids);
 }
 function entryRow(e, dur, ongoing) {
   const run = isRunState(e.machine, e.state, e.run);
@@ -1071,7 +1107,7 @@ function bucketsFor(from, to) {
 }
 function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
 function renderAnalysis() {
-  buildSeg('aRange', RANGES, S.arange, v => { S.arange = v; LS.set('arange', v); renderAll(); });
+  buildSeg('aRange', RANGES, S.arange, v => { S.arange = v; S.abucket = null; LS.set('arange', v); renderAll(); });
   const b = rangeBounds(S.arange), D = getData(b.from);
   const empty = $('#anEmpty'), body = $('#anBody');
   if (!D.ready) { empty.hidden = false; body.hidden = true; rc(empty, h('p', { class: 'empty-t' }, S.conn === 'offline' ? "The shared log isn't available here." : 'Loading ' + b.phrase + '…')); return; }
@@ -1096,8 +1132,15 @@ function renderAnalysis() {
     kpiEl('Stops', String(st.stops), '', days >= 2 ? (st.stops / days).toFixed(1) + ' per day' : 'in this period'),
     dcN ? kpiEl('Avg die change', String(Math.round(dcMs / dcN / MIN)), 'min', plural(dcN, 'die change')) : kpiEl('Die changes', '0', '', 'in this period'),
     flN ? kpiEl('MTTR', String(Math.round(flMs / flN / MIN)), 'min', plural(flN, 'breakdown') + ', die changes excluded') : kpiEl('MTTR', '–', '', 'no breakdowns'));
+  if (S.afocus && !st.causes.some(c => c.key === S.afocus)) S.afocus = null;
+  const fb = $('#anFocus'), fc = S.afocus ? st.causes.find(c => c.key === S.afocus) : null;
+  fb.hidden = !fc;
+  if (fc) rc(fb, h('i', { style: 'background:' + causeColor(fc.machine, fc.state) }), h('span', null, 'Showing ', h('b', null, fc.state + ' · ' + fc.machine), ' across the charts: ' + fmtDur(fc.ms) + ', ' + plural(fc.n, 'stop') + ', ' + Math.round(fc.ms / (st.down || 1) * 100) + '% of downtime.'),
+    h('button', { type: 'button', class: 'btn btn-sm', onclick: () => setFocus(null) }, 'Show all'));
   renderPareto(st); renderTrend(R, b); renderIssues(R); renderModes(st); renderByShift(R, b, st);
 }
+function setFocus(k) { S.afocus = S.afocus === k ? null : k; S.abucket = null; tipHide(); renderAll(); }
+const keyPress = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } };
 function renderPareto(st) {
   const box = $('#anPareto');
   if (!st.causes.length) { rc(box, h('p', { class: 'muted' }, 'No downtime in this period.')); return; }
@@ -1109,9 +1152,10 @@ function renderPareto(st) {
     const vital = before < 0.8;
     if (!vital && !cut && i > 0) { out.push(h('div', { class: 'pr-cut' }, h('span', null, 'above the line: ' + Math.round(before * 100) + '% of downtime'))); cut = true; }
     const col = causeColor(c.machine, c.state);
-    out.push(h('div', { class: 'pr' + (vital ? ' vital' : '') },
+    const on = S.afocus === c.key;
+    out.push(h('div', { class: 'pr pick' + (vital ? ' vital' : '') + (S.afocus ? (on ? ' on' : ' dim') : ''), role: 'button', tabindex: '0', 'aria-pressed': String(on), 'aria-label': causeLabel(c) + ', ' + fmtDur(c.ms) + '. ' + (on ? 'Showing across the charts. Press to show all.' : 'Press to show across the charts.'), onclick: () => setFocus(c.key), onkeydown: keyPress },
       h('div', { class: 'pr-l' }, h('span', { class: 'pr-name' }, c.state), h('span', { class: 'pr-sub' }, c.machine + ' · ' + plural(c.n, 'stop') + ' · avg ' + fmtDur(c.ms / c.n))),
-      h('div', { class: 'pr-track' }, h('div', { class: 'pr-bar', style: 'width:' + Math.max(0.8, c.ms / max * 100).toFixed(2) + '%;background:' + col, 'data-tip': causeLabel(c) + '\n' + fmtDur(c.ms) + ' · ' + plural(c.n, 'stop') + ' · avg ' + fmtDur(c.ms / c.n) + '\nLongest: ' + fmtDur(c.longest) })),
+      h('div', { class: 'pr-track' }, h('div', { class: 'pr-bar', style: 'width:' + Math.max(0.8, c.ms / max * 100).toFixed(2) + '%;background:' + col, 'data-tip': fmtDur(c.ms) + ' · ' + causeLabel(c) + '\n' + plural(c.n, 'stop') + ' · average ' + fmtDur(c.ms / c.n) + '\nLongest: ' + fmtDur(c.longest) + '\n' + Math.round(c.ms / total * 100) + '% of downtime' })),
       h('div', { class: 'pr-v' }, fmtDur(c.ms)),
       h('div', { class: 'pr-c' }, Math.round(cum / total * 100) + '%')));
   });
@@ -1127,19 +1171,32 @@ function renderTrend(R, b) {
   }
   const inMin = unit === 'hour', div = inMin ? MIN : HOUR, u = inMin ? ' min' : ' h';
   const maxV = niceMax(Math.max(0, ...vals.map(v => v.total / div)));
-  $('#trSub').textContent = 'Downtime per ' + unit + ', stacked by cause, in ' + (inMin ? 'minutes.' : 'hours.');
+  $('#trSub').textContent = 'Downtime per ' + unit + ', stacked by cause, in ' + (inMin ? 'minutes' : 'hours') + '. Tap a column for its breakdown.';
   const keysAll = uniq(R.segs.filter(s => s.run === false).map(s => s.machine + '|' + s.state)).sort((a, c) => causeRank(a) - causeRank(c));
+  const F = S.afocus, label = i => (B[i].unit === 'week' ? 'Week of ' : '') + (B[i].unit === 'hour' ? fmtDay(B[i].s) + ' ' : '') + B[i].label;
+  if (S.abucket != null && S.abucket >= B.length) S.abucket = null;
   const grid = [0, 0.5, 1].map(f => h('div', { class: 'tr-grid', style: 'bottom:' + (f * 100) + '%' }, h('span', null, String(+(maxV * f).toFixed(2)) + u)));
   const cols = vals.map((v, i) => {
-    const keys = keysAll.filter(k => v.c[k]);
-    const tip = (B[i].unit === 'week' ? 'Week of ' : '') + (B[i].unit === 'hour' ? fmtDay(B[i].s) + ' ' : '') + B[i].label + '\n' + (v.total ? fmtDur(v.total) + ' downtime' : 'No downtime') + keys.slice(0, 6).map(k => '\n' + k.replace('|', ' · ') + ': ' + fmtDur(v.c[k])).join('');
-    return h('div', { class: 'tr-col', 'data-tip': tip }, h('div', { class: 'tr-stack', style: 'height:' + (v.total / div / maxV * 100).toFixed(2) + '%' },
-      keys.map(k => { const [m, s] = k.split('|'); return h('i', { style: 'flex:' + v.c[k] + ' 1 0;background:' + causeColor(m, s) }); })));
+    const keys = keysAll.filter(k => v.c[k]).sort((a, c) => v.c[c] - v.c[a]);
+    const fv = F ? (v.c[F] || 0) : null;
+    const tip = (F ? fmtDur(fv) + ' ' + F.split('|')[1].toLowerCase() + ' · ' + label(i) + '\n' + fmtDur(v.total) + ' downtime in total' : (v.total ? fmtDur(v.total) : 'No') + ' downtime · ' + label(i)) + keys.slice(0, 6).map(k => '\n' + fmtDur(v.c[k]) + '  ' + k.replace('|', ' · ')).join('') + (keys.length > 6 ? '\n+' + (keys.length - 6) + ' more' : '');
+    return h('div', { class: 'tr-col' + (S.abucket === i ? ' sel' : ''), tabindex: '0', role: 'button', 'aria-pressed': String(S.abucket === i), 'data-tip': tip,
+      onclick: () => { tipHide(); S.abucket = S.abucket === i ? null : i; renderAll(); }, onkeydown: keyPress },
+      h('div', { class: 'tr-stack', style: 'height:' + (v.total / div / maxV * 100).toFixed(2) + '%' },
+        keysAll.filter(k => v.c[k]).map(k => { const [m, s] = k.split('|'); return h('i', { class: F && F !== k ? 'dim' : null, style: 'flex:' + v.c[k] + ' 1 0;background:' + causeColor(m, s) }); })));
   });
   const step = Math.max(1, Math.ceil(B.length / 6)), xl = [];
   for (let i = 0; i < B.length; i += step) xl.push(h('span', { style: 'left:' + ((i + 0.5) / B.length * 100).toFixed(2) + '%' }, B[i].label));
-  rc($('#anTrend'), h('div', { class: 'tr-plot' }, grid, h('div', { class: 'tr-cols' }, cols)), h('div', { class: 'tr-x' }, xl));
-  rc($('#trLegend'), keysAll.map(k => { const [m, s] = k.split('|'); return h('span', { class: 'lg' }, h('i', { class: 'sw', style: 'background:' + causeColor(m, s) }), m + ' · ' + s); }));
+  rc($('#anTrend'), h('div', { class: 'tr-plot' + (F ? ' focused' : '') }, grid, h('div', { class: 'tr-cols' }, cols)), h('div', { class: 'tr-x' }, xl));
+  rc($('#trLegend'), keysAll.map(k => { const [m, s] = k.split('|'); return h('button', { type: 'button', class: 'lg lgb' + (F ? (F === k ? ' on' : ' dim') : ''), 'aria-pressed': String(F === k), onclick: () => setFocus(k) }, h('i', { class: 'sw', style: 'background:' + causeColor(m, s) }), m + ' · ' + s); }));
+  const det = $('#trDetail'), i = S.abucket;
+  det.hidden = i == null;
+  if (i == null) return;
+  const v = vals[i], keys = keysAll.filter(k => v.c[k]).sort((a, c) => v.c[c] - v.c[a]), mx = keys.length ? v.c[keys[0]] : 1;
+  rc(det, h('div', { class: 'trd-h' }, h('b', null, label(i)), h('span', null, v.total ? fmtDur(v.total) + ' downtime' : 'No downtime'), h('button', { type: 'button', class: 'x', 'aria-label': 'Close breakdown', onclick: () => { S.abucket = null; renderAll(); } }, '×')),
+    keys.length ? keys.map(k => { const [m, st] = k.split('|'); return h('button', { type: 'button', class: 'trd-r' + (F === k ? ' on' : ''), onclick: () => { const keep = S.abucket; setFocus(k); S.abucket = keep; renderAll(); } },
+      h('span', { class: 'trd-n' }, st, h('small', null, m)), h('span', { class: 'trd-bar' }, h('i', { style: 'width:' + (v.c[k] / mx * 100).toFixed(1) + '%;background:' + causeColor(m, st) })), h('span', { class: 'trd-v' }, fmtDur(v.c[k]))); })
+      : h('p', { class: 'muted' }, 'The line ran, or nothing was logged.'));
 }
 function stoppedOverlap(segs, iv, m) {
   let lo = 0, hi = segs.length;
@@ -1168,7 +1225,12 @@ function renderIssues(R) {
       prev = iv;
     }
   }
-  const list = [...rows.values()].sort((a, b) => b.ms - a.ms).slice(0, 30);
+  let list = [...rows.values()].sort((a, b) => b.ms - a.ms);
+  if (S.afocus) {
+    const [fm, fs] = S.afocus.split('|'), g = groupsCfg().find(x => x.name === fm);
+    list = list.filter(r => g ? g.members.includes(r.machine) : (r.machine === fm && r.state === fs));
+  }
+  list = list.slice(0, 30);
   const box = $('#anIssues');
   if (!list.length) { rc(box, h('p', { class: 'muted' }, 'No issues in this period.')); return; }
   rc(box, h('table', { style: 'min-width:620px' },
@@ -1646,6 +1708,15 @@ function renderMachineHistory(who) {
   const list = uniqBy(L.D.events, e => e.id).filter(e => who.includes(e.machine) && e.at <= L.now).sort((a, b) => byAt(b, a)).slice(0, 15);
   const box = $('#shHist');
   box.classList.toggle('one', who.length === 1);
+  const tl = $('#shTl');
+  tl.hidden = who.length !== 1;
+  if (who.length === 1) {
+    const m = who[0], segs = (L.RS.mint[m] || []).map(iv => Object.assign({ machine: m, uid: null, personName: '' }, iv));
+    const byId = {}; L.D.events.forEach(e => { byId[e.id] = e; });
+    segs.forEach(sg => { const e = byId[sg.evId]; if (e) { sg.uid = e.uid; sg.personName = e.personName; } });
+    const mark = sg => { $$('#shHist .erow').forEach(r => r.classList.toggle('hl', !!sg && r.dataset.id === sg.evId)); const r = sg && $('#shHist .erow.hl'); if (r) r.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+    renderTimeline(tl, segs, L.shift.start, L.shift.end, L.now, { key: 'm:' + m, open: false, onPick: mark });
+  }
   if (!list.length) { rc(box, h('p', { class: 'muted' }, 'Nothing logged in the last day.')); return; }
   const rows = []; let day = '';
   for (const e of list) { const d = fmtDay(e.at); if (d !== day) { day = d; rows.push(h('div', { class: 'dayhead' }, d)); } rows.push(entryRow(e, (next[e.id] || L.now) - e.at, !next[e.id])); }
@@ -2068,22 +2139,40 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.inst
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (S.wantWake && !S.wake) setWake(true); renderAll(); } });
 if ('serviceWorker' in navigator && location.protocol === 'https:') window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 
-/* tooltip */
+/* tooltip: hover with a mouse, tap on a touch screen, or focus with the keyboard. First line is the heading. */
 const tip = $('#tip');
-function posTip(e) {
+let tipEl = null;
+function tipFill(text) { const [head, ...rest] = String(text).split('\n'); rc(tip, h('b', null, head), rest.map(l => h('span', null, l))); }
+function tipAt(x, y, below) {
   const p = 14, w = tip.offsetWidth, ht = tip.offsetHeight;
-  let x = e.clientX + p, y = e.clientY + p;
-  if (x + w > innerWidth - 8) x = e.clientX - w - p;
-  if (y + ht > innerHeight - 8) y = e.clientY - ht - p;
-  tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+  let left = x + p, top = below ? y + p : y - ht - p;
+  if (left + w > innerWidth - 8) left = x - w - p;
+  if (top < 8) top = y + p;
+  if (top + ht > innerHeight - 8) top = y - ht - p;
+  tip.style.left = Math.max(8, left) + 'px'; tip.style.top = Math.max(8, top) + 'px';
 }
+function tipShowFor(el) {
+  tipEl = el; tipFill(el.getAttribute('data-tip')); tip.hidden = false;
+  const r = el.getBoundingClientRect();
+  const x = Math.min(Math.max(r.left + r.width / 2, 8), innerWidth - 8);
+  tipAt(x - 14, r.top, false);
+}
+function tipHide() { tip.hidden = true; tipEl = null; }
 document.addEventListener('pointerover', e => {
+  if (e.pointerType === 'touch') return;
   const t = e.target.closest && e.target.closest('[data-tip]');
-  if (!t || e.pointerType === 'touch') { tip.hidden = true; return; }
-  tip.textContent = t.getAttribute('data-tip'); tip.hidden = false; posTip(e);
+  if (!t) { tipHide(); return; }
+  tipEl = t; tipFill(t.getAttribute('data-tip')); tip.hidden = false; tipAt(e.clientX, e.clientY, true);
 });
-document.addEventListener('pointermove', e => { if (!tip.hidden) posTip(e); });
-document.addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
+document.addEventListener('pointermove', e => { if (!tip.hidden && e.pointerType !== 'touch') tipAt(e.clientX, e.clientY, true); });
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch') return;
+  const t = e.target.closest && e.target.closest('[data-tip]');
+  if (t) tipShowFor(t); else tipHide();
+}, { passive: true });
+document.addEventListener('focusin', e => { const t = e.target.closest && e.target.closest('[data-tip]'); if (t && t.matches(':focus-visible')) tipShowFor(t); });
+document.addEventListener('focusout', e => { if (tipEl && e.target === tipEl) tipHide(); });
+document.addEventListener('scroll', tipHide, { passive: true, capture: true });
 
 /* clocks: re-render only, never writes */
 setInterval(() => {

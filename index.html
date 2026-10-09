@@ -96,15 +96,17 @@
     <div id="anEmpty" class="empty" hidden></div>
     <div id="anBody" class="panelset" hidden>
       <div class="lede"><p class="kicker" id="anKicker"></p><h2 class="headline" id="anHead"></h2><p class="subline" id="anSub"></p></div>
+      <div class="focusbar" id="anFocus" role="status" hidden></div>
       <div class="kpis k6" id="anKpis"></div>
       <section class="panel" aria-labelledby="parTitle">
-        <div class="panel-head"><div><h3 id="parTitle">Where the downtime goes</h3><p class="panel-sub">Every cause that stopped extrusion, biggest first. Rows above the dashed line make up 80% of the downtime.</p></div></div>
+        <div class="panel-head"><div><h3 id="parTitle">Where the downtime goes</h3><p class="panel-sub">Every cause that stopped extrusion, biggest first. Rows above the dashed line make up 80% of the downtime. Tap a cause to follow it through the other charts.</p></div></div>
         <div class="pareto" id="anPareto"></div>
       </section>
       <section class="panel" aria-labelledby="trTitle">
         <div class="panel-head"><div><h3 id="trTitle">Downtime over time</h3><p class="panel-sub" id="trSub"></p></div></div>
         <div class="legend" id="trLegend"></div>
         <div class="tr" id="anTrend"></div>
+        <div class="trd" id="trDetail" hidden></div>
       </section>
       <section class="panel" aria-labelledby="miTitle">
         <div class="panel-head"><div><h3 id="miTitle">Issues and alarms</h3><p class="panel-sub">Every downtime state and alarm on every machine, including support-machine issues the line ran through. Line stopped is the part that cost extrusion time.</p></div></div>
@@ -226,7 +228,7 @@
         <input id="shAt" type="datetime-local" aria-label="Start time" hidden>
       </div>
       <p id="shErr" class="form-err" role="alert" hidden></p>
-      <div id="shHistWrap" class="sh-sec sh-hist" hidden><p class="lbl">History</p><div class="hlist compact" id="shHist"></div></div>
+      <div id="shHistWrap" class="sh-sec sh-hist" hidden><p class="lbl">This shift</p><div class="tl" id="shTl"></div><p class="lbl">History</p><div class="hlist compact" id="shHist"></div></div>
     </div>
     <div class="sh-foot"><button type="submit" class="btn btn-primary btn-lg btn-block" id="shSubmit" disabled>Log</button></div>
   </form>
