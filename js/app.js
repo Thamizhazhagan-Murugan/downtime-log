@@ -2276,7 +2276,8 @@ function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
   Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], waits: w ? clone(w.waits) : [], ro: !!w && !canEditJob(w) });
-  $('#jb-arrived').value = toLocalInput(Date.now());
+  // marking a waiting job fixed: the parts arrived now, unless the technician changes the time
+  if (finishing) JB.waits.forEach(x => { if (!x.to) { x.to = Date.now(); x._auto = true; } });
   $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : tx('New maintenance job · {0}', myName());
   $('#jbTitle').textContent = w ? w.equipment : 'New job';
   $('#jb-eq').value = w ? w.equipment : '';
@@ -2297,22 +2298,24 @@ function renderJobSoft() { if (JB.id && !S.work.some(w => w.id === JB.id)) close
 function renderJob() {
   const ro = JB.ro, w = JB.id ? S.work.find(x => x.id === JB.id) : null;
   const top = equipChoices().slice(0, 10), cur = $('#jb-eq').value.trim().toLowerCase();
-  rc($('#jbEqChips'), ro ? null : top.map(n => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(cur === n.toLowerCase() || cur === dn(n).toLowerCase()), onclick: () => { $('#jb-eq').value = dn(n); renderJob(); } }, n)));
+  rc($('#jbEqChips'), ro || JB.id ? null : top.map(n => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(cur === n.toLowerCase() || cur === dn(n).toLowerCase()), onclick: () => { $('#jb-eq').value = dn(n); renderJob(); } }, n)));
   const crew = crewChoices(JB.owner), extra = JB.helpers.filter(x => !crew.some(u => u.id === x.uid));
   $('#jbCrewWrap').hidden = !crew.length && !extra.length;
   rc($('#jbCrew'), h('span', { class: 'chip', 'aria-pressed': 'true', 'aria-disabled': 'true', title: 'Logged the job' }, h('i'), JB.ownerName),
     crew.map(u => { const on = JB.helpers.some(x => x.uid === u.id); return h('button', { type: 'button', class: 'chip', disabled: ro, 'aria-pressed': String(on), onclick: () => { if (on) JB.helpers = JB.helpers.filter(x => x.uid !== u.id); else JB.helpers.push({ uid: u.id, name: u.name }); renderJob(); } }, h('i'), u.name); }),
     extra.map(x => h('span', { class: 'chip', 'aria-pressed': 'true' }, h('i'), x.name)));
-  rc($('#jbStatus'), WSTAT.map(([k, l]) => h('button', { type: 'button', class: 'mode st-' + k, disabled: ro, 'aria-pressed': String(JB.status === k), onclick: () => setFormStatus(k) }, l)));
+  rc($('#jbStatus'), WSTAT.map(([k, l]) => h('button', { type: 'button', class: 'mode st-' + k, disabled: ro, 'aria-pressed': String(JB.status === k), onclick: () => setFormStatus(k) }, k === 'parts' ? txAt('Waiting for parts (short)', l) : l)));
   $('#jbEndWrap').hidden = JB.status !== 'fixed';
-  const ow = JB.waits.find(x => !x.to), done = JB.waits.filter(x => x.to).reduce((t, x) => t + x.to - x.from, 0);
-  $('#jbArrivedWrap').hidden = !ow || JB.status === 'parts';
-  $('#jbArrivedNow').hidden = ro;
-  const wt = $('#jbWait');
-  wt.textContent = ow ? tx(JB.status === 'parts' ? 'Waiting for parts since {0}. The job time is stopped until the parts arrive.' : 'Job time stopped since {0}, while waiting for parts.', fmtWhen(ow.from)) + (done >= MIN ? ' ' + tx('Already stopped before: {0}.', fmtDur(done)) : '')
-    : JB.status === 'parts' ? tx('The job time stops while you wait for parts.')
-    : done >= MIN ? tx('Time stopped while waiting for parts: {0}. It is not counted in the job time.', fmtDur(done)) : '';
-  wt.hidden = !wt.textContent;
+  // waits for parts: each one can be corrected (when the clock stopped, when the parts arrived)
+  $('#jbAddWait').hidden = ro;
+  $('#jbWaitsWrap').hidden = !JB.waits.length;
+  const dt = (x, k, lbl) => h('label', { class: 'field' }, h('span', null, lbl), h('input', { type: 'datetime-local', value: x[k] ? toLocalInput(x[k]) : '', disabled: ro,
+    oninput: e => { x[k] = fromLocalInput(e.target.value); delete x._auto; jbErr(''); waitNote(); } }));
+  rc($('#jbWaits'), JB.waits.map((x, i) => h('div', { class: 'wt' },
+    dt(x, 'from', 'Waiting for parts from'),
+    !x.to && JB.status === 'parts' ? h('div', { class: 'field' }, h('span', null, 'Parts arrived'), h('p', { class: 'wt-open' }, 'Still waiting')) : dt(x, 'to', 'Parts arrived'),
+    ro ? null : h('button', { type: 'button', class: 'ibtn danger', 'aria-label': tx('Remove wait {0}', i + 1), onclick: () => { JB.waits.splice(i, 1); renderJob(); } }, '×'))));
+  waitNote();
   rc($('#jbType'), WTYPES.map(t => h('button', { type: 'button', class: 'mode', disabled: ro, 'aria-pressed': String(JB.type === t), onclick: () => { JB.type = t; renderJob(); } }, t)));
   rc($('#jbParts'), JB.parts.map((p, i) => h('div', { class: 'prt' },
       h('input', { type: 'text', value: p.no, maxlength: '40', placeholder: 'Part number', 'aria-label': tx('Part number {0}', i + 1), readonly: ro, oninput: e => { p.no = e.target.value; } }),
@@ -2328,8 +2331,28 @@ function renderJob() {
   $('#jbSave').hidden = ro;
   $('#jbSave').textContent = JB.id ? 'Save' : (JB.status === 'fixed' ? 'Save job' : 'Start job');
 }
+function waitNote() {
+  const now = Date.now(), total = JB.waits.reduce((t, x) => t + (x.from ? Math.max(0, (x.to || now) - x.from) : 0), 0), wt = $('#jbWait');
+  wt.textContent = total >= MIN ? tx('Job time stopped for parts: {0} (not counted).', fmtDur(total)) : JB.status === 'parts' ? tx('The job time stops while you wait for parts.') : '';
+  wt.hidden = !wt.textContent;
+}
+function addWait() {
+  const now = Date.now();
+  if (JB.status === 'parts' && !JB.waits.some(x => !x.to)) JB.waits.push({ from: now, to: null });
+  else JB.waits.push({ from: now, to: now });
+  renderJob();
+  const r = $$('#jbWaits .wt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus();
+}
 function setFormStatus(k) {
   JB.status = k;
+  if (k === 'parts') {
+    const auto = JB.waits.find(x => x._auto);
+    if (auto) { auto.to = null; delete auto._auto; }
+    else if (!JB.waits.some(x => !x.to)) JB.waits.push({ from: Date.now(), to: null, _new: true });
+  } else {
+    JB.waits = JB.waits.filter(x => !(x._new && !x.to));
+    JB.waits.forEach(x => { if (!x.to) { x.to = Date.now(); x._auto = true; } });
+  }
   if (k === 'fixed') { if (!$('#jb-end').value) $('#jb-end').value = toLocalInput(Date.now()); }
   else $('#jb-end').value = '';
   jbErr(''); renderJob();
@@ -2347,18 +2370,23 @@ function jobFromForm() {
   if (end != null && end < start) throw 'The finish time must be after the start time.';
   if (end != null && end > Date.now() + 5 * MIN) throw 'The finish time is in the future.';
   if (status === 'fixed' && !solution) throw 'Describe the solution before marking the job fixed.';
-  const ow = JB.waits.find(x => !x.to);
-  let arrived = null;
-  if (ow && status !== 'parts') {
-    arrived = fromLocalInput($('#jb-arrived').value);
-    if (!arrived) throw 'Enter when the parts arrived.';
-    // the time boxes only go to the minute, so a time in the same minute counts as that moment
-    if (ow.from - arrived >= MIN) throw tx('The parts arrived before the job was set to waiting ({0}). Check the time.', fmtWhen(ow.from));
-    if (arrived > Date.now() + 5 * MIN) throw 'The parts arrival time is in the future.';
-    if (end != null && arrived - end >= MIN) throw 'The parts must arrive before the job is fixed.';
-    if (end != null) arrived = Math.min(arrived, end);
-  }
-  const waits = waitsFor(JB.waits, status, arrived || Date.now());
+  // waits for parts. The time boxes only go to the minute, so a time in the same minute counts as that moment.
+  const waits = JB.waits.map(x => ({ from: x.from, to: x.to }));
+  if (status === 'parts' && !waits.some(x => !x.to)) waits.push({ from: Date.now(), to: null });
+  waits.sort((a, b) => (a.from || 0) - (b.from || 0));
+  waits.forEach((x, i) => {
+    if (!x.from) throw 'Enter when the job started waiting for parts.';
+    if (x.from > Date.now() + 5 * MIN) throw 'A wait for parts starts in the future.';
+    if (start - x.from >= MIN) throw 'A wait for parts starts before the job started.';
+    if (end != null && x.from - end >= MIN) throw 'A wait for parts starts after the job was fixed.';
+    const prev = waits[i - 1];
+    if (prev && (!prev.to || prev.to - x.from >= MIN)) throw 'Two waits for parts overlap. Check the times.';
+    if (!x.to) { if (status !== 'parts') throw 'Enter when the parts arrived.'; return; }
+    if (x.from - x.to >= MIN) throw 'The parts arrived before the wait started. Check the times.';
+    if (x.to > Date.now() + 5 * MIN) throw 'The parts arrival time is in the future.';
+    if (end != null && x.to - end >= MIN) throw 'The parts must arrive before the job is fixed.';
+    x.to = Math.max(x.from, end != null ? Math.min(x.to, end) : x.to);
+  });
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
   return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end, waits };
 }
@@ -2642,7 +2670,7 @@ $('#jbDelete').addEventListener('click', deleteJob);
 $('#jbPdf').addEventListener('click', e => { const w = S.work.find(x => x.id === JB.id); if (w) workPdf([w], { single: true }, e.currentTarget); });
 $('#jbStartNow').addEventListener('click', () => { $('#jb-start').value = toLocalInput(Date.now()); });
 $('#jbEndNow').addEventListener('click', () => { $('#jb-end').value = toLocalInput(Date.now()); });
-$('#jbArrivedNow').addEventListener('click', () => { $('#jb-arrived').value = toLocalInput(Date.now()); });
+$('#jbAddWait').addEventListener('click', addWait);
 $('#jb-eq').addEventListener('input', () => renderJob());
 job.addEventListener('click', e => { if (e.target === job) closeJob(); });
 $('#wNew').addEventListener('click', () => openJob(null));
