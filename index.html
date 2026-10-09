@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="css/app.css?v=18">
+<link rel="stylesheet" href="css/app.css?v=19">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
 </head>
 <body>
@@ -149,7 +149,7 @@
       <div class="seg" id="wRange" role="group" aria-label="Period"></div>
       <div class="tb-r">
         <div class="seg" id="wWho" role="group" aria-label="Whose jobs"></div>
-        <button type="button" class="btn" id="wPdf">Download PDF</button>
+        <button type="button" class="btn" id="wPdf">Shift report PDF</button>
         <button type="button" class="btn btn-primary" id="wNew">+ New job</button>
       </div>
     </div>
@@ -314,6 +314,21 @@
   </form>
 </dialog>
 
+<!-- MAINTENANCE SHIFT REPORT -->
+<dialog id="wrep" class="sheet sheet-sm" aria-labelledby="wrTitle">
+  <form id="wrForm" novalidate>
+    <div class="sh-head">
+      <div><p class="kicker">Maintenance</p><h2 id="wrTitle">Shift report</h2><p class="sh-now">The jobs one technician finished in one shift.</p></div>
+      <button type="button" class="x" id="wrClose" aria-label="Close">×</button>
+    </div>
+    <div class="sh-body">
+      <div class="sh-sec"><p class="lbl">Technician</p><div id="wrWho"></div></div>
+      <div class="sh-sec"><p class="lbl">Shift</p><div class="opts" id="wrShifts"></div></div>
+    </div>
+    <div class="sh-foot dlg-actions"><span class="sp"><span class="muted wr-note" id="wrNote"></span></span><button type="submit" class="btn btn-primary" id="wrGo">Download PDF</button></div>
+  </form>
+</dialog>
+
 <!-- EDIT ENTRY -->
 <dialog id="edit" class="sheet" aria-labelledby="edTitle">
   <form id="edForm" novalidate>
@@ -363,8 +378,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="js/i18n.js?v=18"></script>
-<script src="js/config.js?v=18"></script>
-<script src="js/app.js?v=18"></script>
+<script src="js/i18n.js?v=19"></script>
+<script src="js/config.js?v=19"></script>
+<script src="js/app.js?v=19"></script>
 </body>
 </html>

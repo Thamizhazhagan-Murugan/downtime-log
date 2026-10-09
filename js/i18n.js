@@ -73,7 +73,8 @@
     job: ['travail', 'travaux'],
     page: ['page', 'pages'],
     part: ['pièce', 'pièces'],
-    shift: ['quart', 'quarts']
+    shift: ['quart', 'quarts'],
+    'work order': ['bon de travail', 'bons de travail']
   };
 
   var FR = {
@@ -744,6 +745,23 @@
     'Work order downloaded': 'Bon de travail téléchargé',
     'Work orders downloaded · {0}': 'Bons de travail téléchargés · {0}',
     'Couldn\'t make the PDF. Try again.': 'Impossible de créer le PDF. Réessayez.',
+    'Shift report': 'Rapport de quart',
+    'The jobs one technician finished in one shift.': 'Les travaux terminés par un technicien pendant un quart.',
+    '1 job completed': '1 travail terminé',
+    '{0} jobs completed': '{0} travaux terminés',
+    'No completed jobs': 'Aucun travail terminé',
+    'A summary page, then {0}.': 'Une page de résumé, puis {0}.',
+    '{0} has no completed jobs in that shift.': '{0} n\'a aucun travail terminé pendant ce quart.',
+    'MAINTENANCE  ·  SHIFT REPORT': 'MAINTENANCE  ·  RAPPORT DE QUART',
+    'Shift start': 'Début du quart',
+    'Shift end': 'Fin du quart',
+    'Jobs completed': 'Travaux terminés',
+    'Equipment (one)': 'Équipement',
+    'Type': 'Type',
+    'Duration': 'Durée',
+    'Parts': 'Pièces',
+    'with {0}': 'avec {0}',
+    'Each job follows on its own page as a work order.': 'Chaque travail suit sur sa propre page, sous forme de bon de travail.',
 
     /* ---------- language button ---------- */
     'Switch to English': 'Switch to English'

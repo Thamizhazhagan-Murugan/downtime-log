@@ -2200,7 +2200,7 @@ function renderMaint() {
   buildSeg('wRange', WRANGES, S.wrange, v => { S.wrange = v; LS.set('wrange', v); renderMaint(); });
   buildSeg('wWho', [{ id: 'all', label: 'Everyone' }, { id: 'mine', label: 'Mine' }], S.wwho, v => { S.wwho = v; LS.set('wwho', v); renderMaint(); });
   const b = wBounds(S.wrange), list = wList(), open = list.filter(isOpenJob), done = list.filter(w => !isOpenJob(w));
-  $('#wPdf').disabled = !done.length && !open.length;
+  $('#wPdf').disabled = !S.workLoaded || !!S.workDenied;
   $('#wNew').disabled = !!S.workDenied;
   if (S.workDenied) {
     const RULES_URL = 'https://github.com/Thamizhazhagan-Murugan/downtime-log/blob/main/firestore.rules';
@@ -2358,24 +2358,118 @@ function deleteJob() {
   closeJob(); toast('Job deleted');
 }
 
-/* ---------- maintenance PDF: one page per job, with a summary page first when there are several ---------- */
+/* ---------- maintenance PDFs ----------
+   Per job: that job's work order. Shift report: one technician, one shift, the jobs they had a hand in and
+   finished in that shift. A summary page first, then one work order per job. */
 async function workPdf(list, o, btn) {
   if (!list.length) { toast('No jobs to put in the report.'); return; }
   if (btn) btn.disabled = true;
   try {
     const jsPDF = await loadJsPDF();
     const doc = drawWork(jsPDF, list, o);
-    const name = o.single ? 'maintenance-job-' + jobNo(list[0]).toLowerCase() + '-' + slug(list[0].equipment) + '.pdf' : 'maintenance-report-' + ymd(o.from) + (ymd(o.from) !== ymd(o.to) ? '-to-' + ymd(o.to) : '') + (o.who ? '-' + slug(o.who) : '') + '.pdf';
+    const name = o.single ? 'maintenance-job-' + jobNo(list[0]).toLowerCase() + '-' + slug(list[0].equipment) + '.pdf'
+      : 'maintenance-shift-report-' + slug(o.tech.name) + '-' + ymd(o.shift.start) + '-' + slug(o.shift.name) + '.pdf';
     saveFile(name, doc.output('blob'));
-    toast(o.single ? tx('Work order downloaded') : tx('Work orders downloaded · {0}', plural(list.length, 'page')));
+    toast(o.single ? tx('Work order downloaded') : tx('Shift report downloaded'));
+    return true;
   } catch (x) {
     if (x && x.code === 'declined') return;
     toast(x && x.message === 'load' ? "Couldn't load the PDF tool. Check the connection and try again." : "Couldn't make the PDF. Try again.");
   } finally { if (btn) btn.disabled = false; }
 }
-function reportWork(btn) {
-  const b = wBounds(S.wrange), list = wList().slice().sort((a, c) => a.start - c.start);
-  workPdf(list, { from: b.from, to: b.to, phrase: b.phrase, who: S.wwho === 'mine' ? myName() : '' }, btn);
+/* who worked a job: the person who logged it and the technicians added to it */
+const onJob = (w, t) => t.uid ? (w.uid === t.uid || w.helpers.some(x => x.uid === t.uid)) : (w.personName === t.name || w.helpers.some(x => x.name === t.name));
+const doneInShift = (t, b) => S.work.filter(w => w.status === 'fixed' && w.end >= b.start && w.end < b.end && onJob(w, t)).sort((a, c) => a.end - c.end);
+const wrep = $('#wrep');
+const WR = { tech: null, shift: null };
+function wrTechs() {
+  const out = new Map();
+  const add = (uid, name) => { if (name && !out.has(uid || name)) out.set(uid || name, { uid: uid || '', name }); };
+  if (!isAdmin()) { add(myUid(), myName()); return [...out.values()]; }
+  S.users.filter(u => u.status === 'active' && (u.team === 'maintenance' || u.role === 'admin')).forEach(u => add(u.id, u.name));
+  S.work.forEach(w => { add(w.uid, w.personName || nameOf(w.uid)); w.helpers.forEach(x => add(x.uid, x.uid && userById(x.uid) ? userById(x.uid).name : x.name)); });
+  return [...out.values()].sort((a, c) => (c.uid === myUid()) - (a.uid === myUid()) || a.name.localeCompare(c.name));
+}
+function wrShifts() { const out = [shiftBounds(Date.now())]; while (out.length < 6) out.push(shiftBounds(out[out.length - 1].start - 1)); return out; }
+function openWorkReport() {
+  const techs = wrTechs(), shifts = wrShifts();
+  WR.tech = techs.find(t => t.uid === myUid()) || techs[0] || { uid: myUid(), name: myName() };
+  // the shift that just ended when nothing is finished yet in the one that just started
+  WR.shift = !doneInShift(WR.tech, shifts[0]).length && doneInShift(WR.tech, shifts[1]).length ? shifts[1] : shifts[0];
+  renderWorkReport();
+  if (typeof wrep.showModal === 'function') { if (!wrep.open) wrep.showModal(); } else wrep.setAttribute('open', '');
+}
+function closeWorkReport() { if (typeof wrep.close === 'function') wrep.close(); else wrep.removeAttribute('open'); }
+function renderWorkReport() {
+  const techs = wrTechs(), shifts = wrShifts(), t = WR.tech;
+  rc($('#wrWho'), techs.length > 1
+    ? h('select', { class: 'sel', 'aria-label': 'Technician', onchange: e => { WR.tech = techs[+e.target.value]; renderWorkReport(); } }, techs.map((x, i) => { const o = h('option', { value: String(i), translate: 'no' }, x.name); if (x === t || (x.uid && x.uid === t.uid)) o.selected = true; return o; }))
+    : h('p', { class: 'wr-name', translate: 'no' }, t.name));
+  rc($('#wrShifts'), shifts.map((b, i) => {
+    const n = doneInShift(t, b).length, on = WR.shift && WR.shift.start === b.start;
+    return h('button', { type: 'button', class: 'opt', 'aria-pressed': String(on), style: '--c:' + (n ? 'var(--run)' : 'var(--axis)'), onclick: () => { WR.shift = b; renderWorkReport(); } },
+      h('i'), h('span', { class: 'opt-t' }, dn(b.name) + ' · ' + new Date(b.start).toLocaleDateString(LOC, { weekday: 'short', month: 'short', day: 'numeric' }),
+        h('small', null, hm(b.start) + '–' + hm(b.end) + ' · ' + (n ? tx(n === 1 ? '1 job completed' : '{0} jobs completed', n) : tx('No completed jobs')), i === 0 ? h('span', { class: 'opt-cur' }, txAt('Now (current state)', 'Now')) : null)));
+  }));
+  const n = WR.shift ? doneInShift(t, WR.shift).length : 0;
+  $('#wrGo').disabled = !n;
+  $('#wrNote').textContent = n ? tx('A summary page, then {0}.', plural(n, 'work order')) : tx('{0} has no completed jobs in that shift.', t.name);
+}
+async function downloadWorkReport(e) {
+  e.preventDefault();
+  const list = WR.shift ? doneInShift(WR.tech, WR.shift) : [];
+  if (!list.length) return;
+  if (await workPdf(list, { summary: true, tech: WR.tech, shift: WR.shift }, $('#wrGo'))) closeWorkReport();
+}
+/* first page of the shift report: who, which shift, the totals, then the list of jobs */
+function drawWorkSummary(doc, list, o) {
+  const PW = 215.9, PH = 279.4, M = 14, W = PW - 2 * M;
+  const C = { ink: [25, 25, 25], ink2: [70, 70, 70], muted: [115, 115, 115], line: [214, 214, 214], panel2: [240, 241, 243], bar: [52, 52, 52], barInk: [255, 255, 255], barMuted: [190, 190, 190] };
+  const txt = (s, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || C.ink)); doc.text(pdfSafe(tr(String(s))), x, y, opt || {}); };
+  const b = o.shift, t = o.tech, head = S.config.report || {};
+  doc.setLineHeightFactor(1.35);
+  // header band
+  doc.setFillColor(...C.bar); doc.rect(0, 0, PW, 32, 'F');
+  txt([head.name, head.sub].filter(Boolean).join(' ') + (head.name || head.sub ? '  ·  ' : '') + tx('MAINTENANCE  ·  SHIFT REPORT'), M, 11, 7.5, 'bold', C.barMuted);
+  txt(tx('{0} SHIFT', dn(b.name).toUpperCase()), M, 23, 22, 'bold', C.barInk);
+  txt(longDate(b.start), PW - M, 16, 10, 'normal', C.barInk, { align: 'right' });
+  txt(tx('Scheduled {0} - {1}', hm(b.start), hm(b.end)), PW - M, 22, 9, 'normal', C.barMuted, { align: 'right' });
+  // who and when
+  let y = 42;
+  const now = Date.now();
+  [['Technician', t.name], ['Shift start', fmtDate(b.start) + ' ' + hm(b.start)], ['Shift end', fmtDate(b.end) + ' ' + hm(b.end)], ['Report time', fmtDate(now) + ' ' + hm(now)]].forEach(([l, v], i) => {
+    const x = M + i * (W / 4); txt(tr(l).toUpperCase(), x, y, 7, 'bold', C.muted);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C.ink);
+    doc.text(doc.splitTextToSize(pdfSafe(v), W / 4 - 3)[0], x, y + 6);   // printed as typed, never translated
+  });
+  y += 13;
+  // the numbers
+  const mins = list.reduce((a, w) => a + wDur(w), 0), parts = list.reduce((a, w) => a + w.parts.reduce((q, p) => q + p.qty, 0), 0);
+  const nT = k => list.filter(w => w.type === k).length;
+  doc.setFillColor(...C.panel2); doc.roundedRect(M, y, W, 21, 2, 2, 'F');
+  [['Jobs', String(list.length)], ['Time on jobs', fmtDur(mins)], ['Breakdowns', String(nT('Breakdown'))], ['Preventive', String(nT('Preventive'))], ['Parts used', String(parts)]]
+    .forEach(([l, v], i) => { const x = M + 5 + i * (W / 5); txt(tr(l).toUpperCase(), x, y + 7, 7, 'bold', C.ink2); txt(v, x, y + 15.5, 15, 'bold'); });
+  y += 29;
+  // the jobs
+  txt(tr('Jobs completed').toUpperCase(), M, y, 9, 'bold', C.ink); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7;
+  const others = w => techNames(w).filter(n => n !== t.name);
+  const cut = (v, n) => { v = String(v || '-').replace(/\s+/g, ' ').trim(); return v.length > n ? v.slice(0, n - 3).trimEnd() + '...' : v; };   // the full text is on the work order
+  y = drawTable(doc, y, [{ h: txAt('Time (clock)', 'Time'), w: 21 }, { h: txAt('Equipment (one)', 'Equipment'), w: 31 }, { h: 'Type', w: 22 }, { h: 'Problem / task', w: 42 }, { h: 'Solution', w: 42 }, { h: 'Duration', w: 18, align: 'right' }, { h: 'Parts', w: 11.9, align: 'right' }],
+    list.map(w => [{ t: hm(w.start) + '-' + hm(w.end) + (ymd(w.start) !== ymd(w.end) || w.start < b.start ? '\n' + fmtDate(w.start) : ''), keep: true },
+      { t: dn(w.equipment) + (others(w).length ? '\n' + tx('with {0}', others(w).join(', ')) : ''), b: true, keep: true },
+      { t: w.type }, { t: cut(w.problem, 220), keep: true }, { t: cut(w.solution, 220), keep: true }, { t: fmtDur(wDur(w)), keep: true }, { t: String(w.parts.reduce((q, p) => q + p.qty, 0)), keep: true }]),
+    { M, W, PH, C: { ink: C.ink, ink2: C.ink2, muted: C.muted, line: C.line, panel2: C.panel2 } });
+  y += 6;
+  if (y < PH - 30) txt(tx('Each job follows on its own page as a work order.'), M, y, 7.5, 'normal', C.muted);
+  // footer on the summary page(s); the work orders after them stay exactly like the paper form
+  const sp = doc.getNumberOfPages();
+  for (let i = 1; i <= sp; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...C.line); doc.setLineWidth(0.2); doc.line(M, PH - 12, M + W, PH - 12);
+    txt(tx('Generated {0} · Extrusion Downtime Log', fmtDate(now) + ' ' + hm(now)), M, PH - 7.5, 7, 'normal', C.muted);
+    txt(tx('Page {0} of {1}', i, sp + list.length), M + W, PH - 7.5, 7, 'normal', C.muted, { align: 'right' });
+  }
+  doc.setPage(sp);
 }
 function drawWork(jsPDF, list, o) {
   /* One work order per page, laid out like the plant's paper work order (Letter size).
@@ -2393,8 +2487,9 @@ function drawWork(jsPDF, list, o) {
   const hms = ms => { const sec = Math.max(0, Math.round(ms / 1000)); return Math.floor(sec / 3600) + ':' + pad2(Math.floor(sec % 3600 / 60)) + ':' + pad2(sec % 60); };
   const head = S.config.report || {}, cname = head.name || '', csub = head.sub || '';
   const kind = t => t.toUpperCase();
+  if (o.summary) drawWorkSummary(doc, list, o);
   list.forEach((w, idx) => {
-    if (idx > 0) doc.addPage();
+    if (idx > 0 || o.summary) doc.addPage();
     const techs = techNames(w), status = statEn(w.status);
     // company heading
     if (cname) txt(cname, L - 0.8, 25.5, 56, 'bold', K.logo);
@@ -2509,7 +2604,10 @@ $('#jbEndNow').addEventListener('click', () => { $('#jb-end').value = toLocalInp
 $('#jb-eq').addEventListener('input', () => renderJob());
 job.addEventListener('click', e => { if (e.target === job) closeJob(); });
 $('#wNew').addEventListener('click', () => openJob(null));
-$('#wPdf').addEventListener('click', e => reportWork(e.currentTarget));
+$('#wPdf').addEventListener('click', openWorkReport);
+$('#wrForm').addEventListener('submit', downloadWorkReport);
+$('#wrClose').addEventListener('click', closeWorkReport);
+wrep.addEventListener('click', e => { if (e.target === wrep) closeWorkReport(); });
 $('#ckForm').addEventListener('submit', submitCheck);
 $('#ckSkip').addEventListener('click', closeCheck);
 $('#ckClose').addEventListener('click', closeCheck);
