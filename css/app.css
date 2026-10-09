@@ -728,3 +728,21 @@ details.howto[open] summary{margin-bottom:12px}
 .team-sel{height:32px;min-height:32px;padding:0 8px;font-size:.82rem;font-weight:600;border-radius:999px}
 .rchip.maint{background:var(--warn-soft);color:var(--warn-ink)}
 textarea{min-height:80px}
+
+/* ---------- forms never scroll sideways; the job form is two columns on wide screens ---------- */
+.sh-body{overflow-x:hidden}
+.sh-body > *,.jcol > *{min-width:0}
+input[type="datetime-local"],input[type="time"]{min-width:0;max-width:100%}
+.field .sh-row label{font:600 .82rem/1.2 var(--f-body);color:var(--ink-2)}
+.field .sh-row .linkbtn{padding:2px 4px}
+.jcol{display:grid;gap:18px;align-content:start;min-width:0}
+.jtimes{gap:12px}
+#jbEndHint:empty{display:none}
+@media (min-width:860px){
+  #job{width:min(58rem,calc(100vw - 48px));max-width:calc(100vw - 48px)}
+  .job-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px 26px}
+  .job-body > .form-err{grid-column:1/-1}
+  .job-body textarea{min-height:96px}
+}
+.jtimes{grid-template-columns:minmax(0,1fr)}
+@media (min-width:560px) and (max-width:859px){.jtimes{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}

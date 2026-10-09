@@ -276,22 +276,26 @@
       <div><p class="kicker" id="jbKicker">Maintenance job</p><h2 id="jbTitle">New job</h2></div>
       <button type="button" class="x" id="jbClose" aria-label="Close">×</button>
     </div>
-    <div class="sh-body">
-      <div class="sh-sec">
-        <label class="field" for="jb-eq"><span>Equipment or place</span><input id="jb-eq" type="text" list="jbEqList" maxlength="60" autocomplete="off" placeholder="Final saw, crane, forklift, press…"></label>
-        <datalist id="jbEqList"></datalist>
-        <div class="chips" id="jbEqChips"></div>
+    <div class="sh-body job-body">
+      <div class="jcol">
+        <div class="sh-sec">
+          <label class="field" for="jb-eq"><span>Equipment or place</span><input id="jb-eq" type="text" list="jbEqList" maxlength="60" autocomplete="off" placeholder="Final saw, crane, forklift, press…"></label>
+          <datalist id="jbEqList"></datalist>
+          <div class="chips" id="jbEqChips"></div>
+        </div>
+        <div class="sh-sec"><p class="lbl">Type of work</p><div class="modes" id="jbType"></div></div>
+        <div class="row2 jtimes">
+          <div class="field"><div class="sh-row"><label for="jb-start">Start</label><button type="button" class="linkbtn" id="jbStartNow">Now</button></div><input id="jb-start" type="datetime-local"></div>
+          <div class="field"><div class="sh-row"><label for="jb-end">Finish</label><button type="button" class="linkbtn" id="jbEndNow">Now</button></div><input id="jb-end" type="datetime-local"><small class="muted" id="jbEndHint"></small></div>
+        </div>
       </div>
-      <div class="sh-sec"><p class="lbl">Type of work</p><div class="modes" id="jbType"></div></div>
-      <label class="field" for="jb-problem"><span>Problem or task</span><textarea id="jb-problem" rows="3" maxlength="2000" placeholder="What was wrong, or the preventive task"></textarea></label>
-      <label class="field" for="jb-fix"><span>Work done / solution</span><textarea id="jb-fix" rows="3" maxlength="2000" placeholder="What you did to fix it"></textarea></label>
-      <div class="sh-sec">
-        <div class="sh-row"><p class="lbl">Parts used</p><button type="button" class="linkbtn" id="jbAddPart">+ Add part</button></div>
-        <div class="prts" id="jbParts"></div>
-      </div>
-      <div class="row2">
-        <div class="field"><label for="jb-start">Start</label><div class="dt"><input id="jb-start" type="datetime-local"><button type="button" class="btn btn-sm" id="jbStartNow">Now</button></div></div>
-        <div class="field"><label for="jb-end">Finish</label><div class="dt"><input id="jb-end" type="datetime-local"><button type="button" class="btn btn-sm" id="jbEndNow">Now</button></div><small class="muted" id="jbEndHint"></small></div>
+      <div class="jcol">
+        <label class="field" for="jb-problem"><span>Problem or task</span><textarea id="jb-problem" rows="3" maxlength="2000" placeholder="What was wrong, or the preventive task"></textarea></label>
+        <label class="field" for="jb-fix"><span>Work done / solution</span><textarea id="jb-fix" rows="3" maxlength="2000" placeholder="What you did to fix it"></textarea></label>
+        <div class="sh-sec">
+          <div class="sh-row"><p class="lbl">Parts used</p><button type="button" class="linkbtn" id="jbAddPart">+ Add part</button></div>
+          <div class="prts" id="jbParts"></div>
+        </div>
       </div>
       <p id="jbErr" class="form-err" role="alert" hidden></p>
     </div>
