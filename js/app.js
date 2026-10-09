@@ -2731,8 +2731,7 @@ function drawWork(jsPDF, list, o) {
     tab('Notes', y); y += 5.6;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
     const dtm = t => date(t) + ' ' + hm(t);
-    const notes = (w.notes ? doc.splitTextToSize(clean(w.notes), W - 2) : []).concat(w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty))
-      .concat(w.waits.filter(x => (x.to || w.end || Date.now()) - x.from >= MIN).map(x => 'Waiting for parts ' + dtm(x.from) + ' - ' + (x.to ? dtm(x.to) : 'still waiting') + (x.to ? '  (' + hms(x.to - x.from) + ', not in duration)' : '')));
+    const notes = (w.notes ? doc.splitTextToSize(clean(w.notes), W - 2) : []).concat(w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty));
     const nLines = Math.max(3, notes.length);
     for (let i = 0; i < nLines; i++) { y += 8; if (notes[i]) txt(notes[i], L + 1, y - 1.4, 9.5, 'normal'); line(L, y, R, y); }
     y += 4;
@@ -2752,11 +2751,11 @@ function drawWork(jsPDF, list, o) {
       if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
     });
-    // every work period: who, start time and end time, under Date and Duration
+    // every work period: start time and end time, under Duration and Breakdown Time
     w.sessions.forEach(x => {
       y += 15;
       if (y > PH - 12) { doc.addPage(); y = 20; }
-      [[L + 63, 46, 'Worked by', sessName(x)], [L + 117, 34, 'Start Time', dtm(x.start)], [L + 159, 34, 'End Time', x.end ? dtm(x.end) : '']].forEach(([cx, wd, l, v]) => {
+      [[L + 117, 34, 'Start Time', dtm(x.start)], [L + 159, 34, 'End Time', x.end ? dtm(x.end) : '']].forEach(([cx, wd, l, v]) => {
         if (v) { doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); txt(doc.splitTextToSize(clean(v), wd)[0], cx, y - 1.6, 9.5, 'bold'); }
         line(cx, y + 1.4, cx + wd, y + 1.4); txt(l, cx, y + 5.6, 10, 'normal', K.label);
       });
