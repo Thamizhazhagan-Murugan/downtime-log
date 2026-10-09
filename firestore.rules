@@ -53,7 +53,10 @@ service cloud.firestore {
         // Only the main admin changes roles.
         || isSuper();
 
-      allow delete: if isSuper();
+      // Removing someone from the app: the main admin can remove anyone but themselves;
+      // other admins can remove people who are not admins. Their past entries are kept.
+      allow delete: if (isSuper() && request.auth.uid != uid)
+        || (isAdmin() && request.auth.uid != uid && resource.data.role != 'admin');
     }
 
     // Log entries: one per state change on a machine.

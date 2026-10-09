@@ -781,3 +781,5 @@ input[type="datetime-local"],input[type="time"]{min-width:0;max-width:100%}
 #job .dlg-actions .sp{min-width:0;display:flex}
 #job .dlg-actions{flex-wrap:nowrap}
 @media (max-width:759px){#job .dlg-actions{flex-wrap:wrap}#job .dlg-actions .sp{flex:1 1 100%;order:-1}#job .dlg-actions .sp:has(.foot-err[hidden]){display:none}}
+.prow .btn-danger{color:var(--down-ink)}
+.prow .btn-danger.armed{background:var(--down);color:var(--on-status)}

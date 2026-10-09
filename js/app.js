@@ -1495,6 +1495,10 @@ function renderPeople(force) {
     if (u.status === 'active' && sup && u.id !== me && !isMain(u)) acts.push(u.role === 'admin' ? btn('Remove admin', 'btn-quiet', b => setUser(u, { role: 'user' }, b, u.name + ' is a user now')) : btn('Make admin', '', b => setUser(u, { role: 'admin' }, b, u.name + ' is an admin now')));
     if (u.status === 'active' && canTouch) acts.push(btn('Turn off', 'btn-quiet', b => { if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Press again'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Turn off'; } }, 4000); return; } setUser(u, { status: 'disabled' }, b, u.name + ' turned off'); }));
     if (u.status === 'disabled' && canTouch) acts.push(btn('Turn back on', '', b => setUser(u, { status: 'active' }, b, u.name + ' turned back on')));
+    if (canTouch) acts.push(btn('Delete', 'btn-danger', b => {
+      if (!b.dataset.armed) { b.dataset.armed = '1'; b.classList.add('armed'); b.textContent = 'Press again to delete'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.classList.remove('armed'); b.textContent = 'Delete'; } }, 4000); return; }
+      deleteUser(u, b);
+    }));
     const teamSel = u.status !== 'disabled' && (canTouch || (sup && u.id !== me)) ? h('select', { class: 'sel team-sel', 'aria-label': 'Team for ' + u.name, onchange: e => setUser(u, { team: e.target.value }, e.target, u.name + (e.target.value === 'maintenance' ? ' is on the maintenance team now' : ' is an operator now')) },
       [['operator', 'Operator'], ['maintenance', 'Maintenance']].map(([v, l]) => { const o = h('option', { value: v }, l); if (u.team === v) o.selected = true; return o; })) : null;
     return h('div', { class: 'prow' }, h('span', { class: 'avatar' }, initials(u.name)),
@@ -1508,7 +1512,12 @@ function renderPeople(force) {
     pend.length ? h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, 'Waiting for approval (' + pend.length + ')'), pend.map(row)) : null,
     h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, 'Active (' + act.length + ')'), act.length ? act.map(row) : h('p', { class: 'muted' }, 'Nobody yet.')),
     off.length ? h('div', { class: 'ugroup' }, h('p', { class: 'lbl' }, 'Turned off (' + off.length + ')'), off.map(row)) : null,
-    h('p', { class: 'panel-sub' }, 'New people sign in with Google or email on the sign-in screen, then show up here for approval. Set each person\'s team: operators log the line, maintenance also gets the Maintenance tab and its job reports. ' + (sup ? 'Only you can make or remove admins.' : 'Only the main admin can make or remove admins.')));
+    h('p', { class: 'panel-sub' }, 'New people sign in with Google or email on the sign-in screen, then show up here for approval. Set each person\'s team: operators log the line, maintenance also gets the Maintenance tab and its job reports. Turn off blocks someone for good. Delete removes their account from the app but keeps their past entries; if they sign in again they come back as a new request. ' + (sup ? 'Only you can make or remove admins.' : 'Only the main admin can make or remove admins.')));
+}
+async function deleteUser(u, btn) {
+  if (btn) btn.disabled = true;
+  try { await S.db.collection('users').doc(u.id).delete(); toast(u.name + ' deleted. Their past entries stay in the history.'); }
+  catch (x) { toast(fbMsg(x)); if (btn) btn.disabled = false; }
 }
 async function setUser(u, patch, btn, msg) {
   if (btn) btn.disabled = true;

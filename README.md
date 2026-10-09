@@ -23,6 +23,7 @@ It runs in any browser and installs on phones and tablets as an app (PWA). Every
 
 - People sign in with **Google** or with **email and password**.
 - A new account waits as **pending** until an admin approves it.
+- Admins can **turn off** a user (blocked for good) or **delete** them (their app account is removed, their past entries stay in the history; signing in again makes a new request). Admins can't delete other admins; the main admin can delete anyone but themselves. Deleting does not remove the person's Google or email login itself; to remove that too, delete them in Firebase console > Authentication > Users.
 - **Users** clock in, log entries and see all the analysis. They can correct their own entries.
 - Every user is on a **team**: **Operator** (the default) or **Maintenance**. Admins set it in **Admin > Users**. Maintenance users also get the **Maintenance** tab. They see the whole team's jobs and can edit their own.
 - Maintenance users log the line like operators. On entries logged by someone else they can change only the description (notes), never the time, state, mode or alarm, and they can't delete them. Operators can't change entries logged by maintenance (or by anyone else).
