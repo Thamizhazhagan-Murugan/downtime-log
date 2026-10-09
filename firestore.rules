@@ -81,7 +81,9 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.equipment is string && request.resource.data.equipment.size() > 0
         && request.resource.data.start is number;
-      allow update: if (isAdmin() || (isMaint() && resource.data.uid == request.auth.uid))
+      // any maintenance person can pick up an open job (it gets their own work period) and finish it;
+      // the person who logged it stays the owner
+      allow update: if (isAdmin() || isMaint())
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.start is number;
       allow delete: if isAdmin() || (isMaint() && resource.data.uid == request.auth.uid);

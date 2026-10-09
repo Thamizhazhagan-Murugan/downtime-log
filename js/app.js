@@ -748,6 +748,7 @@ function clockOut() {
   const now = Date.now();
   S.clockingOut = true;
   S.db.collection('sessions').doc(s.id).update({ open: false, clockOut: now }).catch(x => toast(fbMsg(x))).then(() => { S.clockingOut = false; });
+  endWorkAt(myUid(), now);
   setTimeout(() => { S.clockingOut = false; }, 5000);
   G.clockedOut = Object.assign({}, s, { name: myName(), clockOut: now });
   S.session = null;
@@ -1590,7 +1591,7 @@ function renderSessions() {
 }
 async function adminClockOut(s, nm, btn) {
   btn.disabled = true;
-  try { await S.db.collection('sessions').doc(s.id).update({ open: false, clockOut: Date.now(), closedBy: myUid() }); toast(tx('{0} clocked out', nm)); }
+  try { const now = Date.now(); await S.db.collection('sessions').doc(s.id).update({ open: false, clockOut: now, closedBy: myUid() }); endWorkAt(s.uid, now); toast(tx('{0} clocked out', nm)); }
   catch (x) { toast(fbMsg(x)); btn.disabled = false; }
 }
 
@@ -2178,7 +2179,11 @@ function normWork(id, d) {
   waits.forEach((x, i) => { if (!x.to && (i < waits.length - 1 || status !== 'parts')) x.to = i < waits.length - 1 ? waits[i + 1].from : (typeof d.end === 'number' ? d.end : x.from); });
   // jobs set to waiting before waits were recorded: count from the last change
   if (status === 'parts' && !waits.some(x => !x.to)) waits.push({ from: Math.max(d.start, typeof d.updatedAt === 'number' ? d.updatedAt : d.start), to: null });
-  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Corrective' ? 'Breakdown' : WTYPES.includes(d.type) ? d.type : 'Other',
+  // work periods: each time someone takes the job they get their own start and end, even the same person on a later shift
+  const sessions = Array.isArray(d.sessions) ? d.sessions.filter(x => x && typeof x.start === 'number').slice(0, 60).map(x => ({ uid: str(x.uid, 128), name: str(x.name, 60), start: x.start, end: typeof x.end === 'number' ? Math.max(x.end, x.start) : null })).sort((a, b) => a.start - b.start) : [];
+  if (!sessions.length) sessions.push({ uid: str(d.uid, 128), name: str(d.personName, 60), start: d.start, end: typeof d.end === 'number' ? d.end : null });
+  if (status === 'fixed') sessions.forEach(x => { if (!x.end) x.end = Math.max(x.start, d.end); });
+  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, sessions, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Corrective' ? 'Breakdown' : WTYPES.includes(d.type) ? d.type : 'Other',
     status, waits,
     problem: str(d.problem, 2000), diagnosis: str(d.diagnosis, 2000), solution: str(d.solution, 2000), notes: str(d.notes, 1000), parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
     createdAt: typeof d.createdAt === 'number' ? d.createdAt : d.start, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0 };
@@ -2196,7 +2201,18 @@ function subWork(on) {
 const jobNo = w => 'WO-' + ymd(w.start).replace(/-/g, '').slice(2) + '-' + w.id.slice(0, 4).toUpperCase();
 /* Job time stops while the job waits for parts. wDur is the working time, wSpan start to finish with the waiting. */
 const waitMs = w => { const e = w.end || Date.now(); return w.waits.reduce((t, x) => t + Math.max(0, Math.min(x.to || e, e) - Math.max(x.from, w.start)), 0); };
-const wDur = w => Math.max(0, (w.end || Date.now()) - w.start - waitMs(w));
+/* working time between a and b: waiting for parts does not count */
+const segMs = (w, a, b) => Math.max(0, b - a - w.waits.reduce((t, x) => t + Math.max(0, Math.min(x.to || b, b) - Math.max(x.from, a)), 0));
+/* job time: the time someone had the job (overlaps counted once), minus waiting for parts */
+function wDur(w) {
+  const e = w.end || Date.now(), iv = w.sessions.map(x => [Math.max(x.start, w.start), Math.min(x.end || e, e)]).filter(x => x[1] > x[0]).sort((a, b) => a[0] - b[0]);
+  const m = []; iv.forEach(x => { const l = m[m.length - 1]; if (l && x[0] <= l[1]) l[1] = Math.max(l[1], x[1]); else m.push(x.slice()); });
+  return m.reduce((t, [a, b]) => t + segMs(w, a, b), 0);
+}
+const sessName = x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name) || '—';
+const holders = w => w.sessions.filter(x => !x.end);
+const hasJob = (w, uid) => holders(w).some(x => x.uid === uid);
+const canPickUp = w => !!w && isOpenJob(w) && (isMaint() || isAdmin()) && !hasJob(w, myUid());
 const wSpan = w => (w.end || Date.now()) - w.start;
 const openWait = w => (w.waits || []).find(x => !x.to) || null;
 function waitsFor(prev, status, at) {
@@ -2206,12 +2222,12 @@ function waitsFor(prev, status, at) {
   else if (open) open.to = Math.max(open.from, at);
   return ws;
 }
-const techNames = w => [w.personName || nameOf(w.uid)].concat(w.helpers.map(x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name)));
+const techNames = w => uniq([w.personName || nameOf(w.uid)].concat(w.sessions.map(sessName), w.helpers.map(x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name))).filter(n => n && n !== '—'));
 const techShort = w => { const t = techNames(w); return t[0] + (t.length > 1 ? ' +' + (t.length - 1) : ''); };
-const canEditJob = w => !!w && (isAdmin() || (isMaint() && w.uid === myUid()));
+const canEditJob = w => !!w && (isAdmin() || (isMaint() && (w.uid === myUid() || w.sessions.some(x => x.uid === myUid()))));
 function wList() {
   const b = wBounds(S.wrange), mine = S.wwho === 'mine';
-  return S.work.filter(w => (isOpenJob(w) || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.helpers.some(x => x.uid === myUid()))).sort((a, c) => isOpenJob(c) - isOpenJob(a) || c.start - a.start);
+  return S.work.filter(w => (isOpenJob(w) || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.helpers.some(x => x.uid === myUid()) || w.sessions.some(x => x.uid === myUid()))).sort((a, c) => isOpenJob(c) - isOpenJob(a) || c.start - a.start);
 }
 function renderMaint() {
   buildSeg('wRange', WRANGES, S.wrange, v => { S.wrange = v; LS.set('wrange', v); renderMaint(); });
@@ -2246,11 +2262,14 @@ function renderMaint() {
   const openCards = open.map(w => h('article', { class: 'card wcard k-' + w.status, onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
     h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, w.status === 'parts' ? 'parts' : 'warn', statLabel(w.status)); return p; })()),
     h('div', { class: 'wc-b' },
-      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', techNames(w).length > 1 ? 'Technicians' : 'Technician', techNames(w).join(', ')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', openWait(w) ? tx('{0}, stopped since {1}', fmtDur(wDur(w)), hm(openWait(w).from)) : fmtDur(wDur(w))))),
-    canEditJob(w) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
+      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', 'Who has it', holders(w).length ? holders(w).map(x => tx('{0} since {1}', sessName(x), fmtWhen(x.start))).join(', ') : tx('Nobody right now')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', openWait(w) ? tx('{0}, stopped since {1}', fmtDur(wDur(w)), hm(openWait(w).from)) : fmtDur(wDur(w))))),
+    hasJob(w, myUid()) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
       h('button', { type: 'button', class: 'btn btn-go', onclick: () => openJob(w.id, true) }, 'Fixed'),
       w.status === 'parts' ? h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'progress', e.currentTarget) }, 'Parts arrived, back to work') : h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'parts', e.currentTarget) }, 'Waiting for parts'),
-      h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => openJob(w.id) }, 'Edit')), null) : null));
+      h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => openJob(w.id) }, 'Edit')), null)
+    : canPickUp(w) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
+      h('button', { type: 'button', class: 'btn btn-primary', onclick: e => pickUp(w, e.currentTarget) }, w.status === 'parts' ? 'Parts arrived, back to work' : 'Pick up this job'),
+      canEditJob(w) ? h('button', { type: 'button', class: 'btn btn-quiet', onclick: () => openJob(w.id) }, 'Edit') : null), null) : null));
   const row = w => h('div', { class: 'wrow', role: 'button', tabindex: '0', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); }, onkeydown: keyPress },
     h('span', { class: 'w-when' }, h('b', null, fmtDate(w.start)), hm(w.start) + '–' + (w.end ? hm(w.end) : tx('now'))),
     h('span', { class: 'w-main' }, h('span', { class: 'w-eq' }, w.equipment, h('span', { class: 'wtype t-' + w.type.toLowerCase() }, w.type)), h('span', { class: 'w-pr' }, w.problem || '—')),
@@ -2275,7 +2294,7 @@ function equipChoices() { return uniqBy(machines().map(m => m.name).concat(S.con
 function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
-  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], waits: w ? clone(w.waits) : [], ro: !!w && !canEditJob(w) });
+  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], waits: w ? clone(w.waits) : [], sessions: w ? clone(w.sessions) : [], ro: !!w && !canEditJob(w) });
   // marking a waiting job fixed: the parts arrived now, unless the technician changes the time
   if (finishing) JB.waits.forEach(x => { if (!x.to) { x.to = Date.now(); x._auto = true; } });
   $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : tx('New maintenance job · {0}', myName());
@@ -2306,6 +2325,15 @@ function renderJob() {
     extra.map(x => h('span', { class: 'chip', 'aria-pressed': 'true' }, h('i'), x.name)));
   rc($('#jbStatus'), WSTAT.map(([k, l]) => h('button', { type: 'button', class: 'mode st-' + k, disabled: ro, 'aria-pressed': String(JB.status === k), onclick: () => setFormStatus(k) }, k === 'parts' ? txAt('Waiting for parts (short)', l) : l)));
   $('#jbEndWrap').hidden = JB.status !== 'fixed';
+  // a saved job: its start is the start of the first work period, so the periods replace the Start box
+  $('#jbStartWrap').hidden = !!JB.id && JB.sessions.length > 0;
+  $('#jbSessWrap').hidden = !JB.id || !JB.sessions.length;
+  const sdt = (x, k, lbl) => h('label', { class: 'field' }, h('span', null, lbl), h('input', { type: 'datetime-local', value: x[k] ? toLocalInput(x[k]) : '', disabled: ro,
+    oninput: e => { x[k] = fromLocalInput(e.target.value); jbErr(''); } }));
+  rc($('#jbSess'), JB.sessions.map((x, i) => h('div', { class: 'wt' },
+    sdt(x, 'start', tx('{0} from', sessName(x))),
+    sdt(x, 'end', x.end ? 'To' : JB.status === 'fixed' ? 'To (when fixed)' : 'To (still has it)'),
+    ro || JB.sessions.length < 2 ? h('span') : h('button', { type: 'button', class: 'ibtn danger', 'aria-label': tx('Remove work period {0}', i + 1), onclick: () => { JB.sessions.splice(i, 1); renderJob(); } }, '×'))));
   // waits for parts: each one can be corrected (when the clock stopped, when the parts arrived)
   $('#jbAddWait').hidden = ro;
   $('#jbWaitsWrap').hidden = !JB.waits.length;
@@ -2361,7 +2389,10 @@ function setFormStatus(k) {
 function addPart() { JB.parts.push({ no: '', desc: '', qty: 1 }); renderJob(); const r = $$('#jbParts .prt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus(); }
 function jobFromForm() {
   const eq = $('#jb-eq').value.trim(), problem = $('#jb-problem').value.trim(), solution = $('#jb-fix').value.trim(), diagnosis = $('#jb-diag').value.trim(), notes = $('#jb-notes').value.trim();
-  const status = JB.status, start = fromLocalInput($('#jb-start').value), endV = status === 'fixed' ? $('#jb-end').value : '', end = endV ? fromLocalInput(endV) : null;
+  const useSess = !!JB.id && JB.sessions.length > 0;
+  const status = JB.status, endV = status === 'fixed' ? $('#jb-end').value : '', end = endV ? fromLocalInput(endV) : null;
+  if (useSess && JB.sessions.some(x => !x.start)) throw 'Every work period needs a start time.';
+  const start = useSess ? Math.min(...JB.sessions.map(x => x.start)) : fromLocalInput($('#jb-start').value);
   if (!eq) throw 'Enter the equipment or place you worked on.';
   if (!problem) throw 'Describe the problem or the task.';
   if (!start) throw 'Enter when the job started.';
@@ -2387,8 +2418,20 @@ function jobFromForm() {
     if (end != null && x.to - end >= MIN) throw 'The parts must arrive before the job is fixed.';
     x.to = Math.max(x.from, end != null ? Math.min(x.to, end) : x.to);
   });
+  // work periods: a new job starts one for the person logging it
+  const sessions = useSess ? JB.sessions.map(x => ({ uid: x.uid, name: x.name, start: x.start, end: x.end })) : [{ uid: myUid(), name: myName(), start, end: null }];
+  sessions.sort((a, b) => a.start - b.start).forEach(x => {
+    if (x.start > Date.now() + 5 * MIN) throw 'A work period starts in the future.';
+    if (end != null && x.start - end >= MIN) throw 'A work period starts after the job was fixed.';
+    if (x.end != null) {
+      if (x.start - x.end >= MIN) throw 'A work period ends before it starts. Check the times.';
+      if (x.end > Date.now() + 5 * MIN) throw 'A work period ends in the future.';
+      if (end != null && x.end - end >= MIN) throw 'A work period ends after the job was fixed.';
+      x.end = Math.max(x.start, end != null ? Math.min(x.end, end) : x.end);
+    } else if (status === 'fixed') x.end = Math.max(x.start, end);
+  });
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
-  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end, waits };
+  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), status, start, end, waits, sessions };
 }
 function saveJob(e) {
   e.preventDefault(); jbErr('');
@@ -2406,8 +2449,26 @@ function saveJob(e) {
   }
   closeJob();
 }
+/* take the job: a new work period for me starts now; whoever had it stops now (also when they picked it up earlier themselves) */
+function pickUp(w, btn) {
+  if (!S.db || !canPickUp(w)) return;
+  if (btn) btn.disabled = true;
+  const now = Date.now();
+  const sessions = w.sessions.map(x => ({ uid: x.uid, name: x.name, start: x.start, end: x.end || now })).concat([{ uid: myUid(), name: myName(), start: now, end: null }]);
+  S.db.collection('work').doc(w.id).update({ sessions, status: 'progress', end: null, waits: waitsFor(w.waits, 'progress', now), updatedAt: now }).catch(jobWriteFailed);
+  toast(tx('{0}: you have the job now', dn(w.equipment)));
+}
+/* clocking out ends the person's work periods on open jobs; the job stays open for the next one to pick up */
+function endWorkAt(uid, at) {
+  if (!S.db || !uid) return;
+  S.work.filter(w => isOpenJob(w) && hasJob(w, uid)).forEach(w => {
+    const sessions = w.sessions.map(x => ({ uid: x.uid, name: x.name, start: x.start, end: x.end || (x.uid === uid ? Math.max(x.start, at) : null) }));
+    S.db.collection('work').doc(w.id).update({ sessions, updatedAt: at }).catch(() => {});
+  });
+}
 function setJobStatus(w, st, btn) {
   if (!S.db || !canEditJob(w)) return;
+  if (st === 'progress' && !hasJob(w, myUid())) return pickUp(w, btn);
   if (btn) btn.disabled = true;
   const now = Date.now();
   S.db.collection('work').doc(w.id).update({ status: st, end: null, waits: waitsFor(w.waits, st, now), updatedAt: now }).catch(jobWriteFailed);
@@ -2426,8 +2487,8 @@ function deleteJob() {
 }
 
 /* ---------- maintenance PDFs ----------
-   Per job: that job's work order. Shift report: one technician, one shift, the jobs they had a hand in and
-   finished in that shift. A summary page first, then one work order per job. */
+   Per job: that job's work order. Shift report: one technician, one shift, every job they worked on in it,
+   finished or not. A summary page first, then one work order per job. */
 async function workPdf(list, o, btn) {
   if (!list.length) { toast('No jobs to put in the report.'); return; }
   if (btn) btn.disabled = true;
@@ -2444,25 +2505,54 @@ async function workPdf(list, o, btn) {
     toast(x && x.message === 'load' ? "Couldn't load the PDF tool. Check the connection and try again." : "Couldn't make the PDF. Try again.");
   } finally { if (btn) btn.disabled = false; }
 }
-/* who worked a job: the person who logged it and the technicians added to it */
-const onJob = (w, t) => t.uid ? (w.uid === t.uid || w.helpers.some(x => x.uid === t.uid)) : (w.personName === t.name || w.helpers.some(x => x.name === t.name));
-const doneInShift = (t, b) => S.work.filter(w => w.status === 'fixed' && w.end >= b.start && w.end < b.end && onJob(w, t)).sort((a, c) => a.end - c.end);
+/* A technician's shift: from their clock-in to their clock-out in that shift, or the scheduled shift when they did not clock in.
+   Their work in it: the time they had each job (their own work periods, cut to that window), finished or not. */
+const isTech = (x, t) => t.uid ? x.uid === t.uid : x.name === t.name;
+function techWindow(t, b) {
+  const cs = ((WR.clock && WR.clock[t.uid]) || []).filter(c => shiftBounds(c.clockIn + 30 * MIN).start === b.start);
+  if (!cs.length) return { from: b.start, to: b.end, clocked: false };
+  return { from: Math.min(...cs.map(c => c.clockIn)), to: Math.max(...cs.map(c => c.clockOut || Date.now())), clocked: true, still: cs.some(c => !c.clockOut) };
+}
+function workInShift(t, b) {
+  const win = techWindow(t, b), now = Date.now(), wEnd = Math.min(win.to, now), out = [];
+  for (const w of S.work) {
+    let mine = w.sessions.filter(x => isTech(x, t));
+    if (!mine.length && w.helpers.some(x => isTech(x, t))) mine = w.sessions;   // helpers worked alongside whoever had the job
+    const segs = mine.map(x => [Math.max(x.start, win.from), Math.min(x.end || now, wEnd, w.end || now)]).filter(([a, c]) => c > a || (a === c && a >= win.from && a <= wEnd));
+    if (!segs.length) continue;
+    const at = wEnd, fixed = w.status === 'fixed' && w.end <= at + MIN;
+    const waiting = !fixed && w.waits.some(x => x.from <= at && (!x.to || x.to > at));
+    out.push({ w, segs, ms: segs.reduce((q, [a, c]) => q + segMs(w, a, c), 0), state: fixed ? 'fixed' : waiting ? 'parts' : 'progress' });
+  }
+  return { win, list: out.sort((a, c) => a.segs[0][0] - c.segs[0][0]) };
+}
 const wrep = $('#wrep');
-const WR = { tech: null, shift: null };
+const WR = { tech: null, shift: null, clock: {} };
 function wrTechs() {
   const out = new Map();
   const add = (uid, name) => { if (name && !out.has(uid || name)) out.set(uid || name, { uid: uid || '', name }); };
   if (!isAdmin()) { add(myUid(), myName()); return [...out.values()]; }
   S.users.filter(u => u.status === 'active' && (u.team === 'maintenance' || u.role === 'admin')).forEach(u => add(u.id, u.name));
-  S.work.forEach(w => { add(w.uid, w.personName || nameOf(w.uid)); w.helpers.forEach(x => add(x.uid, x.uid && userById(x.uid) ? userById(x.uid).name : x.name)); });
+  S.work.forEach(w => { add(w.uid, w.personName || nameOf(w.uid)); w.sessions.forEach(x => add(x.uid, sessName(x))); w.helpers.forEach(x => add(x.uid, x.uid && userById(x.uid) ? userById(x.uid).name : x.name)); });
   return [...out.values()].sort((a, c) => (c.uid === myUid()) - (a.uid === myUid()) || a.name.localeCompare(c.name));
 }
 function wrShifts() { const out = [shiftBounds(Date.now())]; while (out.length < 6) out.push(shiftBounds(out[out.length - 1].start - 1)); return out; }
+/* the technician's clock-ins, to cut the report to their clock-in and clock-out times */
+function loadClock(t) {
+  if (!t.uid || WR.clock[t.uid] || !S.db) return;
+  WR.clock[t.uid] = [];
+  S.db.collection('sessions').where('uid', '==', t.uid).get().then(snap => {
+    WR.clock[t.uid] = snap.docs.map(d => normSession(d.id, d.data() || {})).filter(Boolean).filter(c => c.clockIn > Date.now() - 10 * DAY);
+    if (wrep.open) renderWorkReport();
+  }).catch(() => {});
+}
 function openWorkReport() {
   const techs = wrTechs(), shifts = wrShifts();
+  WR.clock = {};
   WR.tech = techs.find(t => t.uid === myUid()) || techs[0] || { uid: myUid(), name: myName() };
-  // the shift that just ended when nothing is finished yet in the one that just started
-  WR.shift = !doneInShift(WR.tech, shifts[0]).length && doneInShift(WR.tech, shifts[1]).length ? shifts[1] : shifts[0];
+  loadClock(WR.tech);
+  // the shift that just ended when nothing is done yet in the one that just started
+  WR.shift = !workInShift(WR.tech, shifts[0]).list.length && workInShift(WR.tech, shifts[1]).list.length ? shifts[1] : shifts[0];
   renderWorkReport();
   if (typeof wrep.showModal === 'function') { if (!wrep.open) wrep.showModal(); } else wrep.setAttribute('open', '');
 }
@@ -2470,30 +2560,31 @@ function closeWorkReport() { if (typeof wrep.close === 'function') wrep.close();
 function renderWorkReport() {
   const techs = wrTechs(), shifts = wrShifts(), t = WR.tech;
   rc($('#wrWho'), techs.length > 1
-    ? h('select', { class: 'sel', 'aria-label': 'Technician', onchange: e => { WR.tech = techs[+e.target.value]; renderWorkReport(); } }, techs.map((x, i) => { const o = h('option', { value: String(i), translate: 'no' }, x.name); if (x === t || (x.uid && x.uid === t.uid)) o.selected = true; return o; }))
+    ? h('select', { class: 'sel', 'aria-label': 'Technician', onchange: e => { WR.tech = techs[+e.target.value]; loadClock(WR.tech); renderWorkReport(); } }, techs.map((x, i) => { const o = h('option', { value: String(i), translate: 'no' }, x.name); if (x === t || (x.uid && x.uid === t.uid)) o.selected = true; return o; }))
     : h('p', { class: 'wr-name', translate: 'no' }, t.name));
   rc($('#wrShifts'), shifts.map((b, i) => {
-    const n = doneInShift(t, b).length, on = WR.shift && WR.shift.start === b.start;
+    const r = workInShift(t, b), n = r.list.length, f = r.list.filter(x => x.state === 'fixed').length, on = WR.shift && WR.shift.start === b.start;
+    const when = r.win.clocked ? tx('clocked in {0}–{1}', hm(r.win.from), r.win.still ? tx('now') : hm(r.win.to)) : hm(b.start) + '–' + hm(b.end);
     return h('button', { type: 'button', class: 'opt', 'aria-pressed': String(on), style: '--c:' + (n ? 'var(--run)' : 'var(--axis)'), onclick: () => { WR.shift = b; renderWorkReport(); } },
       h('i'), h('span', { class: 'opt-t' }, dn(b.name) + ' · ' + new Date(b.start).toLocaleDateString(LOC, { weekday: 'short', month: 'short', day: 'numeric' }),
-        h('small', null, hm(b.start) + '–' + hm(b.end) + ' · ' + (n ? tx(n === 1 ? '1 job completed' : '{0} jobs completed', n) : tx('No completed jobs')), i === 0 ? h('span', { class: 'opt-cur' }, txAt('Now (current state)', 'Now')) : null)));
+        h('small', null, when + ' · ' + (n ? tx('{0} · {1} fixed', plural(n, 'job'), f) : tx('No jobs')), i === 0 ? h('span', { class: 'opt-cur' }, txAt('Now (current state)', 'Now')) : null)));
   }));
-  const n = WR.shift ? doneInShift(t, WR.shift).length : 0;
+  const n = WR.shift ? workInShift(t, WR.shift).list.length : 0;
   $('#wrGo').disabled = !n;
-  $('#wrNote').textContent = n ? tx('A summary page, then {0}.', plural(n, 'work order')) : tx('{0} has no completed jobs in that shift.', t.name);
+  $('#wrNote').textContent = n ? tx('A summary page, then {0}.', plural(n, 'work order')) : tx('{0} did not work on any job in that shift.', t.name);
 }
 async function downloadWorkReport(e) {
   e.preventDefault();
-  const list = WR.shift ? doneInShift(WR.tech, WR.shift) : [];
-  if (!list.length) return;
-  if (await workPdf(list, { summary: true, tech: WR.tech, shift: WR.shift }, $('#wrGo'))) closeWorkReport();
+  const r = WR.shift ? workInShift(WR.tech, WR.shift) : null;
+  if (!r || !r.list.length) return;
+  if (await workPdf(r.list.map(x => x.w), { summary: true, tech: WR.tech, shift: WR.shift, rep: r }, $('#wrGo'))) closeWorkReport();
 }
-/* first page of the shift report: who, which shift, the totals, then the list of jobs */
+/* first page of the shift report: who, which shift and clock times, the totals, then every job they worked on */
 function drawWorkSummary(doc, list, o) {
   const PW = 215.9, PH = 279.4, M = 14, W = PW - 2 * M;
   const C = { ink: [25, 25, 25], ink2: [70, 70, 70], muted: [115, 115, 115], line: [214, 214, 214], panel2: [240, 241, 243], bar: [52, 52, 52], barInk: [255, 255, 255], barMuted: [190, 190, 190] };
   const txt = (s, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || C.ink)); doc.text(pdfSafe(tr(String(s))), x, y, opt || {}); };
-  const b = o.shift, t = o.tech, head = S.config.report || {};
+  const b = o.shift, t = o.tech, head = S.config.report || {}, r = o.rep, win = r.win, items = r.list;
   doc.setLineHeightFactor(1.35);
   // header band
   doc.setFillColor(...C.bar); doc.rect(0, 0, PW, 32, 'F');
@@ -2503,37 +2594,39 @@ function drawWorkSummary(doc, list, o) {
   txt(tx('Scheduled {0} - {1}', hm(b.start), hm(b.end)), PW - M, 22, 9, 'normal', C.barMuted, { align: 'right' });
   // who and when
   let y = 42;
-  const now = Date.now();
-  [['Technician', t.name], ['Shift start', fmtDate(b.start) + ' ' + hm(b.start)], ['Shift end', fmtDate(b.end) + ' ' + hm(b.end)], ['Report time', fmtDate(now) + ' ' + hm(now)]].forEach(([l, v], i) => {
+  const now = Date.now(), stamp = ms => fmtDate(ms) + ' ' + hm(ms);
+  [['Technician', t.name], [win.clocked ? 'Clocked in' : 'Shift start', stamp(win.from)], [win.clocked ? (win.still ? 'Still clocked in' : 'Clocked out') : 'Shift end', win.still ? '-' : stamp(win.to)], ['Report time', stamp(now)]].forEach(([l, v], i) => {
     const x = M + i * (W / 4); txt(tr(l).toUpperCase(), x, y, 7, 'bold', C.muted);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C.ink);
     doc.text(doc.splitTextToSize(pdfSafe(v), W / 4 - 3)[0], x, y + 6);   // printed as typed, never translated
   });
   y += 13;
-  // the numbers
-  const mins = list.reduce((a, w) => a + wDur(w), 0), parts = list.reduce((a, w) => a + w.parts.reduce((q, p) => q + p.qty, 0), 0);
+  // the numbers: this technician's time in this shift
+  const mins = items.reduce((a, x) => a + x.ms, 0), parts = list.reduce((a, w) => a + w.parts.reduce((q, p) => q + p.qty, 0), 0);
   const nT = k => list.filter(w => w.type === k).length;
   doc.setFillColor(...C.panel2); doc.roundedRect(M, y, W, 21, 2, 2, 'F');
-  [['Jobs', String(list.length)], ['Time on jobs', fmtDur(mins)], ['Breakdowns', String(nT('Breakdown'))], ['Preventive', String(nT('Preventive'))], ['Parts used', String(parts)]]
-    .forEach(([l, v], i) => { const x = M + 5 + i * (W / 5); txt(tr(l).toUpperCase(), x, y + 7, 7, 'bold', C.ink2); txt(v, x, y + 15.5, 15, 'bold'); });
+  [['Jobs', String(items.length)], [txAt('Fixed (count)', 'Fixed'), String(items.filter(x => x.state === 'fixed').length)], [txAt('Time on jobs (short)', 'Time on jobs'), fmtDur(mins)], ['Breakdowns', String(nT('Breakdown'))], ['Preventive', String(nT('Preventive'))], ['Parts used', String(parts)]]
+    .forEach(([l, v], i) => { const x = M + 5 + i * (W / 6); txt(tr(l).toUpperCase(), x, y + 7, 7, 'bold', C.ink2); txt(v, x, y + 15.5, 15, 'bold'); });
   y += 29;
   // the jobs
-  txt(tr('Jobs completed').toUpperCase(), M, y, 9, 'bold', C.ink); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7;
+  txt(tr('Jobs worked on').toUpperCase(), M, y, 9, 'bold', C.ink); doc.setDrawColor(...C.ink); doc.setLineWidth(0.4); doc.line(M, y + 1.8, M + W, y + 1.8); y += 7;
   const others = w => techNames(w).filter(n => n !== t.name);
   const cut = (v, n) => { v = String(v || '-').replace(/\s+/g, ' ').trim(); return v.length > n ? v.slice(0, n - 3).trimEnd() + '...' : v; };   // the full text is on the work order
-  y = drawTable(doc, y, [{ h: txAt('Time (clock)', 'Time'), w: 21 }, { h: txAt('Equipment (one)', 'Equipment'), w: 31 }, { h: 'Type', w: 22 }, { h: 'Problem / task', w: 40 }, { h: 'Solution', w: 40 }, { h: 'Duration', w: 22, align: 'right' }, { h: 'Parts', w: 11.9, align: 'right' }],
-    list.map(w => [{ t: hm(w.start) + '-' + hm(w.end) + (ymd(w.start) !== ymd(w.end) || w.start < b.start ? '\n' + fmtDate(w.start) : ''), keep: true },
+  const stLbl = k => k === 'fixed' ? tx('Fixed') : k === 'parts' ? tx('Waiting for parts') : tx('Not finished');
+  y = drawTable(doc, y, [{ h: txAt('Time (clock)', 'Time'), w: 22 }, { h: txAt('Equipment (one)', 'Equipment'), w: 30 }, { h: 'Type', w: 20 }, { h: 'Problem / task', w: 37 }, { h: 'Solution', w: 37 }, { h: 'Status', w: 20 }, { h: 'Duration', w: 21.9, align: 'right' }],
+    items.map(({ w, segs, ms, state }) => [{ t: segs.map(([a, c]) => hm(a) + '-' + hm(c)).join('\n'), keep: true },
       { t: dn(w.equipment) + (others(w).length ? '\n' + tx('with {0}', others(w).join(', ')) : ''), b: true, keep: true },
-      { t: w.type }, { t: cut(w.problem, 220), keep: true }, { t: cut(w.solution, 220), keep: true }, { t: fmtDur(wDur(w)) + (waitMs(w) >= MIN ? '\n' + tx('+{0} waiting', fmtDur(waitMs(w))) : ''), keep: true }, { t: String(w.parts.reduce((q, p) => q + p.qty, 0)), keep: true }]),
+      { t: w.type }, { t: cut(w.problem, 200), keep: true }, { t: state === 'fixed' ? cut(w.solution, 200) : '-', keep: true }, { t: stLbl(state), keep: true },
+      { t: fmtDur(ms), keep: true }]),
     { M, W, PH, C: { ink: C.ink, ink2: C.ink2, muted: C.muted, line: C.line, panel2: C.panel2 } });
   y += 6;
-  if (y < PH - 30) txt(tx('Each job follows on its own page as a work order.') + (list.some(w => waitMs(w) >= MIN) ? ' ' + tx('Time spent waiting for parts is not counted in the job time.') : ''), M, y, 7.5, 'normal', C.muted);
+  if (y < PH - 34) { doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.splitTextToSize(pdfSafe(tx('Time is this technician\'s time on each job in this shift; waiting for parts is not counted. Each job follows on its own page as a work order.')), W).forEach((l, i) => txt(l, M, y + i * 3.6, 7.5, 'normal', C.muted)); }
   // footer on the summary page(s); the work orders after them stay exactly like the paper form
   const sp = doc.getNumberOfPages();
   for (let i = 1; i <= sp; i++) {
     doc.setPage(i);
     doc.setDrawColor(...C.line); doc.setLineWidth(0.2); doc.line(M, PH - 12, M + W, PH - 12);
-    txt(tx('Generated {0} · Extrusion Downtime Log', fmtDate(now) + ' ' + hm(now)), M, PH - 7.5, 7, 'normal', C.muted);
+    txt(tx('Generated {0} · Extrusion Downtime Log', stamp(now)), M, PH - 7.5, 7, 'normal', C.muted);
     txt(tx('Page {0} of {1}', i, sp + list.length), M + W, PH - 7.5, 7, 'normal', C.muted, { align: 'right' });
   }
   doc.setPage(sp);
@@ -2609,6 +2702,7 @@ function drawWork(jsPDF, list, o) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
     const dtm = t => date(t) + ' ' + hm(t);
     const notes = (w.notes ? doc.splitTextToSize(clean(w.notes), W - 2) : []).concat(w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty))
+      .concat(w.sessions.length > 1 || w.sessions.some(x => x.uid !== w.uid) ? w.sessions.map(x => 'Worked: ' + clean(sessName(x)) + '  ' + dtm(x.start) + ' - ' + (x.end ? dtm(x.end) : 'still on it')) : [])
       .concat(w.waits.filter(x => (x.to || w.end || Date.now()) - x.from >= MIN).map(x => 'Waiting for parts ' + dtm(x.from) + ' - ' + (x.to ? dtm(x.to) : 'still waiting') + (x.to ? '  (' + hms(x.to - x.from) + ', not in duration)' : '')));
     const nLines = Math.max(3, notes.length);
     for (let i = 0; i < nLines; i++) { y += 8; if (notes[i]) txt(notes[i], L + 1, y - 1.4, 9.5, 'normal'); line(L, y, R, y); }
