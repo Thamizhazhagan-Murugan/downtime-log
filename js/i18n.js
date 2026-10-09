@@ -769,6 +769,7 @@
     '+ Add my time': '+ Ajouter mon temps',
     'Start - end': 'Début - fin',
     'Who has it': 'Qui l\'a',
+    'Has the job': 'A le travail',
     '{0} since {1}': '{0} depuis {1}',
     'Nobody right now': 'Personne en ce moment',
     'Pick up this job': 'Prendre ce travail',

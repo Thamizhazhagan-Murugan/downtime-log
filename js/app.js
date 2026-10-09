@@ -2180,9 +2180,13 @@ function normWork(id, d) {
   // jobs set to waiting before waits were recorded: count from the last change
   if (status === 'parts' && !waits.some(x => !x.to)) waits.push({ from: Math.max(d.start, typeof d.updatedAt === 'number' ? d.updatedAt : d.start), to: null });
   // work periods: each time someone takes the job they get their own start and end, even the same person on a later shift
-  const sessions = Array.isArray(d.sessions) ? d.sessions.filter(x => x && typeof x.start === 'number').slice(0, 60).map(x => Object.assign({ uid: str(x.uid, 128), name: str(x.name, 60), start: x.start, end: typeof x.end === 'number' ? Math.max(x.end, x.start) : null }, x.manual === true ? { manual: true } : {})).sort((a, b) => a.start - b.start) : [];
+  const crewOf = a => Array.isArray(a) ? a.filter(x => x && typeof x.name === 'string' && x.name.trim()).slice(0, 8).map(x => ({ uid: str(x.uid, 128), name: str(x.name, 60) })) : null;
+  const sessions = Array.isArray(d.sessions) ? d.sessions.filter(x => x && typeof x.start === 'number').slice(0, 60).map(x => Object.assign({ uid: str(x.uid, 128), name: str(x.name, 60), start: x.start, end: typeof x.end === 'number' ? Math.max(x.end, x.start) : null, helpers: crewOf(x.helpers) }, x.manual === true ? { manual: true } : {})).sort((a, b) => a.start - b.start) : [];
   if (!sessions.length) sessions.push({ uid: str(d.uid, 128), name: str(d.personName, 60), start: d.start, end: typeof d.end === 'number' ? d.end : null });
   if (status === 'fixed') sessions.forEach(x => { if (!x.end) x.end = Math.max(x.start, d.end); });
+  // jobs saved before each period had its own crew: the technicians belong to the first period
+  if (!sessions.some(x => x.helpers)) sessions[0].helpers = helpers;
+  sessions.forEach(x => { if (!x.helpers) x.helpers = []; });
   return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, sessions, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Corrective' ? 'Breakdown' : WTYPES.includes(d.type) ? d.type : 'Other',
     status, waits,
     problem: str(d.problem, 2000), diagnosis: str(d.diagnosis, 2000), solution: str(d.solution, 2000), notes: str(d.notes, 1000), parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
@@ -2209,6 +2213,9 @@ function wDur(w) {
   const m = []; iv.forEach(x => { const l = m[m.length - 1]; if (l && x[0] <= l[1]) l[1] = Math.max(l[1], x[1]); else m.push(x.slice()); });
   return m.reduce((t, [a, b]) => t + segMs(w, a, b), 0);
 }
+const sessOut = x => Object.assign({ uid: x.uid, name: x.name, start: x.start, end: x.end == null ? null : x.end, helpers: (x.helpers || []).map(m => ({ uid: m.uid || '', name: m.name })) }, x.manual ? { manual: true } : {});
+const lastSess = w => w.sessions[w.sessions.length - 1];
+const crewName = m => (m.uid && userById(m.uid) ? userById(m.uid).name : m.name) || '';
 const sessName = x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name) || '—';
 const holders = w => w.sessions.filter(x => !x.end);
 const hasJob = (w, uid) => holders(w).some(x => x.uid === uid);
@@ -2237,12 +2244,12 @@ function waitsFor(prev, status, at) {
   else if (open) open.to = Math.max(open.from, at);
   return ws;
 }
-const techNames = w => uniq([w.personName || nameOf(w.uid)].concat(w.sessions.map(sessName), w.helpers.map(x => (x.uid && userById(x.uid) ? userById(x.uid).name : x.name))).filter(n => n && n !== '—'));
+const techNames = w => { const l = lastSess(w); return uniq([l.uid || l.name ? sessName(l) : (w.personName || nameOf(w.uid))].concat(l.helpers.map(crewName))).filter(n => n && n !== '—'); };
 const techShort = w => { const t = techNames(w); return t[0] + (t.length > 1 ? ' +' + (t.length - 1) : ''); };
 const canEditJob = w => !!w && (isAdmin() || (isMaint() && (w.uid === myUid() || w.sessions.some(x => x.uid === myUid()))));
 function wList() {
   const b = wBounds(S.wrange), mine = S.wwho === 'mine';
-  return S.work.filter(w => (isOpenJob(w) || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.helpers.some(x => x.uid === myUid()) || w.sessions.some(x => x.uid === myUid()))).sort((a, c) => isOpenJob(c) - isOpenJob(a) || c.start - a.start);
+  return S.work.filter(w => (isOpenJob(w) || (w.start <= b.to && (w.end || w.start) >= b.from)) && (!mine || w.uid === myUid() || w.sessions.some(x => x.uid === myUid() || x.helpers.some(m => m.uid === myUid())))).sort((a, c) => isOpenJob(c) - isOpenJob(a) || c.start - a.start);
 }
 function renderMaint() {
   buildSeg('wRange', WRANGES, S.wrange, v => { S.wrange = v; LS.set('wrange', v); renderMaint(); });
@@ -2277,7 +2284,7 @@ function renderMaint() {
   const openCards = open.map(w => h('article', { class: 'card wcard k-' + w.status, onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
     h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, w.status === 'parts' ? 'parts' : 'warn', statLabel(w.status)); return p; })()),
     h('div', { class: 'wc-b' },
-      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', 'Who has it', holders(w).length ? holders(w).map(x => tx('{0} since {1}', sessName(x), fmtWhen(x.start))).join(', ') : tx('Nobody right now')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', openWait(w) ? tx('{0}, stopped since {1}', fmtDur(wDur(w)), hm(openWait(w).from)) : fmtDur(wDur(w))))),
+      h('div', { class: 'irows' }, irow('alarm', 'Problem / task', w.problem || '—'), irow('user', 'Who has it', holders(w).length ? holders(w).map(x => tx('{0} since {1}', [sessName(x)].concat(x.helpers.map(crewName)).join(', '), fmtWhen(x.start))).join(', ') : tx('Nobody right now')), irow('clock', 'Started', fmtWhen(w.start)), irow('down', 'Time so far', openWait(w) ? tx('{0}, stopped since {1}', fmtDur(wDur(w)), hm(openWait(w).from)) : fmtDur(wDur(w))))),
     hasJob(w, myUid()) ? h('div', { class: 'lc-foot' }, h('div', { class: 'hero-act' },
       h('button', { type: 'button', class: 'btn btn-go', onclick: () => openJob(w.id, true) }, 'Fixed'),
       w.status === 'parts' ? h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'progress', e.currentTarget) }, 'Parts arrived, back to work') : h('button', { type: 'button', class: 'btn', onclick: e => setJobStatus(w, 'parts', e.currentTarget) }, 'Waiting for parts'),
@@ -2309,7 +2316,7 @@ function equipChoices() { return uniqBy(machines().map(m => m.name).concat(S.con
 function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
-  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], waits: w ? clone(w.waits) : [], sessions: w ? clone(w.sessions) : [], ro: !!w && !canEditJob(w) });
+  Object.assign(JB, { id: w ? w.id : null, owner: w ? (lastSess(w).uid || w.uid) : myUid(), ownerName: w ? (lastSess(w).uid || lastSess(w).name ? sessName(lastSess(w)) : (w.personName || nameOf(w.uid))) : myName(), status: w ? (finishing ? 'fixed' : w.status) : 'progress', type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(lastSess(w).helpers) : [], waits: w ? clone(w.waits) : [], sessions: w ? clone(w.sessions) : [], ro: !!w && !canEditJob(w) });
   // marking a waiting job fixed: the parts arrived now, unless the technician changes the time
   if (finishing) JB.waits.forEach(x => { if (!x.to) { x.to = Date.now(); x._auto = true; } });
   $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : tx('New maintenance job · {0}', myName());
@@ -2335,7 +2342,7 @@ function renderJob() {
   rc($('#jbEqChips'), ro || JB.id ? null : top.map(n => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(cur === n.toLowerCase() || cur === dn(n).toLowerCase()), onclick: () => { $('#jb-eq').value = dn(n); renderJob(); } }, n)));
   const crew = crewChoices(JB.owner), extra = JB.helpers.filter(x => !crew.some(u => u.id === x.uid));
   $('#jbCrewWrap').hidden = !crew.length && !extra.length;
-  rc($('#jbCrew'), h('span', { class: 'chip', 'aria-pressed': 'true', 'aria-disabled': 'true', title: 'Logged the job' }, h('i'), JB.ownerName),
+  rc($('#jbCrew'), h('span', { class: 'chip', 'aria-pressed': 'true', 'aria-disabled': 'true', title: 'Has the job' }, h('i'), JB.ownerName),
     crew.map(u => { const on = JB.helpers.some(x => x.uid === u.id); return h('button', { type: 'button', class: 'chip', disabled: ro, 'aria-pressed': String(on), onclick: () => { if (on) JB.helpers = JB.helpers.filter(x => x.uid !== u.id); else JB.helpers.push({ uid: u.id, name: u.name }); renderJob(); } }, h('i'), u.name); }),
     extra.map(x => h('span', { class: 'chip', 'aria-pressed': 'true' }, h('i'), x.name)));
   rc($('#jbStatus'), WSTAT.map(([k, l]) => h('button', { type: 'button', class: 'mode st-' + k, disabled: ro, 'aria-pressed': String(JB.status === k), onclick: () => setFormStatus(k) }, k === 'parts' ? txAt('Waiting for parts (short)', l) : l)));
@@ -2448,7 +2455,9 @@ function jobFromForm() {
     x.to = Math.max(x.from, end != null ? Math.min(x.to, end) : x.to);
   });
   // work periods: a new job starts one for the person logging it
-  const sessions = useSess ? JB.sessions.map(x => Object.assign({ uid: x.uid, name: x.name, start: x.start, end: x.end }, x.manual ? { manual: true } : {})) : [Object.assign({ uid: myUid(), name: myName(), start, end: stop }, stop ? { manual: true } : {})];
+  const crew = JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) }));
+  const sessions = useSess ? JB.sessions.map(sessOut) : [Object.assign({ uid: myUid(), name: myName(), start, end: stop, helpers: crew }, stop ? { manual: true } : {})];
+  if (useSess) { const last = sessions.reduce((a, x) => (x.start >= a.start ? x : a), sessions[0]); last.helpers = crew; }
   sessions.sort((a, b) => a.start - b.start).forEach(x => {
     if (x.start > Date.now() + 5 * MIN) throw 'A work period starts in the future.';
     if (end != null && x.start - end >= MIN) throw 'A work period starts after the job was fixed.';
@@ -2484,15 +2493,15 @@ function pickUp(w, btn) {
   if (!S.db || !canPickUp(w)) return;
   if (btn) btn.disabled = true;
   const now = Date.now();
-  const sessions = w.sessions.map(x => ({ uid: x.uid, name: x.name, start: x.start, end: x.end || now })).concat([{ uid: myUid(), name: myName(), start: now, end: null }]);
-  S.db.collection('work').doc(w.id).update({ sessions, status: 'progress', end: null, waits: waitsFor(w.waits, 'progress', now), updatedAt: now }).catch(jobWriteFailed);
+  const sessions = w.sessions.map(x => sessOut(Object.assign({}, x, { end: x.end || now }))).concat([{ uid: myUid(), name: myName(), start: now, end: null, helpers: [] }]);
+  S.db.collection('work').doc(w.id).update({ sessions, helpers: [], status: 'progress', end: null, waits: waitsFor(w.waits, 'progress', now), updatedAt: now }).catch(jobWriteFailed);
   toast(tx('{0}: you have the job now', dn(w.equipment)));
 }
 /* clocking out ends the person's work periods on open jobs; the job stays open for the next one to pick up */
 function endWorkAt(uid, at) {
   if (!S.db || !uid) return;
   S.work.filter(w => isOpenJob(w) && hasJob(w, uid)).forEach(w => {
-    const sessions = w.sessions.map(x => ({ uid: x.uid, name: x.name, start: x.start, end: x.end || (x.uid === uid ? Math.max(x.start, at) : null) }));
+    const sessions = w.sessions.map(x => sessOut(Object.assign({}, x, { end: x.end || (x.uid === uid ? Math.max(x.start, at) : null) })));
     S.db.collection('work').doc(w.id).update({ sessions, updatedAt: at }).catch(() => {});
   });
 }
@@ -2546,8 +2555,7 @@ function techWindow(t, b) {
 function workInShift(t, b) {
   const win = techWindow(t, b), now = Date.now(), wEnd = Math.min(win.to, now), out = [];
   for (const w of S.work) {
-    let mine = w.sessions.filter(x => isTech(x, t));
-    if (!mine.length && w.helpers.some(x => isTech(x, t))) mine = w.sessions;   // helpers worked alongside whoever had the job
+    const mine = w.sessions.filter(x => isTech(x, t) || x.helpers.some(m => isTech(m, t)));
     const segs = mine.map(x => [Math.max(x.start, win.from), Math.min(x.end || now, wEnd, w.end || now)]).filter(([a, c]) => c > a || (a === c && a >= win.from && a <= wEnd));
     if (!segs.length) continue;
     const at = wEnd, fixed = w.status === 'fixed' && w.end <= at + MIN;
@@ -2563,7 +2571,7 @@ function wrTechs() {
   const add = (uid, name) => { if (name && !out.has(uid || name)) out.set(uid || name, { uid: uid || '', name }); };
   if (!isAdmin()) { add(myUid(), myName()); return [...out.values()]; }
   S.users.filter(u => u.status === 'active' && (u.team === 'maintenance' || u.role === 'admin')).forEach(u => add(u.id, u.name));
-  S.work.forEach(w => { add(w.uid, w.personName || nameOf(w.uid)); w.sessions.forEach(x => add(x.uid, sessName(x))); w.helpers.forEach(x => add(x.uid, x.uid && userById(x.uid) ? userById(x.uid).name : x.name)); });
+  S.work.forEach(w => { add(w.uid, w.personName || nameOf(w.uid)); w.sessions.forEach(x => { add(x.uid, sessName(x)); x.helpers.forEach(m => add(m.uid, crewName(m))); }); });
   return [...out.values()].sort((a, c) => (c.uid === myUid()) - (a.uid === myUid()) || a.name.localeCompare(c.name));
 }
 function wrShifts() { const out = [shiftBounds(Date.now())]; while (out.length < 6) out.push(shiftBounds(out[out.length - 1].start - 1)); return out; }
