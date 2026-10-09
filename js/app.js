@@ -849,7 +849,7 @@ function renderShift(L) {
   load.hidden = true; body.hidden = false;
   const strip = $('#clockStrip');
   strip.hidden = S.conn !== 'live' || !!S.session;
-  renderHero(L); renderTiles(L); renderShiftPanel(L); renderShiftLog(L);
+  renderHero(L); renderTiles(L); renderShiftPanel(L);
 }
 const lockOut = () => !canLog() || useExample();
 function actBtn(label, cls, fn) { return h('button', { type: 'button', class: cls, disabled: lockOut(), onclick: e => fn(e.currentTarget) }, label); }
@@ -867,14 +867,6 @@ function renderHero(L) {
   else if (line.group) rc(cause, h('b', null, andList(line.group.members)), ' all down for more than ' + line.group.delay + ' min');
   else if (kind === 'run') cause.textContent = line.mode && line.mode !== 'Auto' ? line.mode : '';
   else rc(cause, [line.ev && line.ev.alarm === OTHER ? line.ev.note : line.ev && line.ev.alarm, line.ev && line.ev.stop ? 'press stopped' : ''].filter(Boolean).join(' · '));
-  const since = kind === 'unk' ? null : lineSince(L.R);
-  const timer = $('#heroTimer');
-  if (since == null) { timer.textContent = '—'; delete timer.dataset.since; }
-  else { timer.dataset.since = String(since); timer.textContent = clock(now - since); }
-  const sinceEl = $('#heroSince'); sinceEl.replaceChildren();
-  if (since != null) {
-    sinceEl.append('since ' + fmtWhen(since));
-  }
   const btns = [];
   if (useExample()) btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(P) }, 'Start the real clock'));
   else if (kind === 'down') {
@@ -895,7 +887,7 @@ function renderWatch(L) {
   const row = o => h('div', { class: 'watch' + (o.urgent ? ' urgent' : '') },
     h('i', { class: 'w-dot', 'aria-hidden': 'true' }),
     h('div', { class: 'w-t' }, h('b', null, o.title), h('span', null, o.sub)),
-    o.until ? h('span', { class: 'w-clock', 'data-until': String(o.until), title: 'Time until the press stops' }, mmss(o.until - now)) : h('span', { class: 'w-clock', 'data-since': String(o.since) }, clock(now - o.since)),
+    o.until ? h('span', { class: 'w-clock', 'data-until': String(o.until), title: 'Time until the press stops' }, mmss(o.until - now)) : h('span'),
     h('div', { class: 'w-act' }, o.actions));
   const what = s => s.state + (evText(s) ? ' · ' + evText(s) : '');
   for (const m of machines()) {
@@ -929,11 +921,9 @@ function renderTiles(L) {
     const causing = e && !run && (m.main || line.machine === m.name || (line.group && line.group.members.includes(m.name)));
     const cls = !e || run ? '' : causing ? ' down' : ' warn';
     const color = run === true ? 'var(--run)' : !e ? 'var(--axis)' : causing ? 'var(--down)' : 'var(--warn)';
-    const since = e ? (!run ? e.downSince : e.at) : null;
     return h('button', { type: 'button', class: 'mtile' + cls, onclick: () => openSheet(m.name), 'aria-label': m.name + ': ' + (e ? e.state + (e.alarm ? ', ' + e.alarm : '') : 'not logged') + '. Log a change.' },
       h('span', { class: 'mt-name' }, m.name),
-      h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), h('span', null, e ? (e.alarm && !run ? e.alarm : e.state) : 'Not logged')),
-      h('span', { class: 'mt-time', 'data-since': since != null ? String(since) : null }, e ? clock(L.now - since) : '—'));
+      h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), h('span', null, e ? (e.alarm && !run ? e.alarm : e.state) : 'Not logged')));
   }));
 }
 function kpiEl(l, v, u, s, meter) {
@@ -983,14 +973,6 @@ function entryRow(e, dur, ongoing) {
     h('span', { class: 'e-note' }, e.alarm ? h('span', { class: 'e-alarm' }, e.alarm) : null, e.alarm && e.note ? ' · ' : null, e.note || null, e.code ? h('code', { class: 'code' }, e.code) : null),
     h('span', { class: 'e-dur' }, ongoing ? h('span', { class: 'live-dot', title: 'Still in this state' }) : null, dur != null ? fmtDur(dur) : ''),
     h('span', { class: 'e-by' }, whoEl(e)));
-}
-function renderShiftLog(L) {
-  const next = nextMap(L.D.events.concat(Object.values(L.D.seeds || {})));
-  const list = L.D.events.filter(e => e.at >= L.shift.start && e.at <= L.now).sort((a, b) => byAt(b, a));
-  const box = $('#shiftLog');
-  if (!list.length) { rc(box, h('p', { class: 'muted' }, 'Nothing logged this shift yet.')); return; }
-  rc(box, list.slice(0, 5).map(e => entryRow(e, (next[e.id] || L.now) - e.at, !next[e.id])));
-  fillNames(box);
 }
 
 /* ================= ANALYSIS ================= */
@@ -1496,9 +1478,17 @@ function renderSheet(soft) {
   $('#shTitle').textContent = target || 'Which machine?';
   let nowTxt;
   if (g) nowTxt = 'Now: ' + g.members.map(x => { const c = sheetCurrent(x); return x + ' ' + (c ? c.state : 'not logged'); }).join(' · ');
-  else if (m) { const cur = sheetCurrent(m); nowTxt = cur ? 'Now: ' + cur.state + (cur.alarm ? ' · ' + cur.alarm : '') + (cur.mode && cur.mode !== cur.state ? ' · ' + cur.mode : '') + (cur.stop && !cur.run ? ' · press stopped' : '') + ' · for ' + fmtDur(now - (cur.run ? cur.at : cur.downSince)) : 'Nothing logged for this machine yet.'; }
+  else if (m) {
+    const cur = sheetCurrent(m);
+    if (cur) {
+      const since = cur.run ? cur.at : cur.downSince;
+      nowTxt = [h('span', { class: 'sh-st', style: '--c:' + (cur.run ? 'var(--run)' : 'var(--down)') }, h('i'), [cur.state, cur.alarm === OTHER ? cur.note : cur.alarm, cur.mode && cur.mode !== cur.state && cur.mode !== 'Auto' ? cur.mode : '', cur.stop && !cur.run ? 'press stopped' : ''].filter(Boolean).join(' · ')),
+        h('span', { class: 'sh-clock' }, h('b', { 'data-since': String(since) }, clock(now - since)), h('small', null, 'since ' + fmtWhen(since)))];
+    } else nowTxt = 'Nothing logged for this machine yet.';
+  }
   else nowTxt = 'Start with the machine, then what it is doing.';
-  $('#shNow').textContent = nowTxt;
+  rc($('#shNow'), nowTxt);
+  renderMachineHistory(g ? g.members : m ? [m] : null);
   if (soft) return;
   $('#shMachWrap').hidden = !!target;
   if (!target) {
@@ -1560,6 +1550,20 @@ function renderSheet(soft) {
   sub.textContent = SH.state ? 'Log ' + SH.state + (SH.alarm && SH.alarm !== OTHER ? ': ' + SH.alarm : '') + (g ? (g.members.length === 2 ? ' on both' : ' on all') : '') + (optional && SH.stop ? ' and stop the press' : '') : (target ? 'Choose what it is doing' : 'Choose a machine');
   sub.className = 'btn btn-lg btn-block ' + (runSel ? 'btn-go' : (optional && SH.stop) ? 'btn-stop' : 'btn-primary');
   sub.disabled = !SH.state || !canLog();
+}
+function renderMachineHistory(who) {
+  const wrap = $('#shHistWrap'), L = S.L;
+  wrap.hidden = !who || !L || !L.ready;
+  if (wrap.hidden) return;
+  const pool = L.D.events.concat(Object.values(L.D.seeds || {}));
+  const next = nextMap(uniqBy(pool, e => e.id));
+  const list = uniqBy(L.D.events, e => e.id).filter(e => who.includes(e.machine) && e.at <= L.now).sort((a, b) => byAt(b, a)).slice(0, 15);
+  const box = $('#shHist');
+  box.classList.toggle('one', who.length === 1);
+  if (!list.length) { rc(box, h('p', { class: 'muted' }, 'Nothing logged in the last day.')); return; }
+  const rows = []; let day = '';
+  for (const e of list) { const d = fmtDay(e.at); if (d !== day) { day = d; rows.push(h('div', { class: 'dayhead' }, d)); } rows.push(entryRow(e, (next[e.id] || L.now) - e.at, !next[e.id])); }
+  rc(box, rows);
 }
 function pickState(stName) {
   SH.state = stName; SH.stop = false; SH.alarm = null;

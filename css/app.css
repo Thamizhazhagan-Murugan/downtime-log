@@ -568,3 +568,16 @@ details.howto[open] summary{margin-bottom:12px}
 .ugroup{display:grid;gap:0;margin-bottom:14px}
 .ugroup > .lbl{margin-bottom:4px}
 @media (max-width:720px){.hmi-right .netchip{order:-1}}
+
+/* ---------- machine view: current timer and history ---------- */
+.sh-now{display:grid;gap:10px}
+.sh-st{--c:var(--axis);display:inline-flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)}
+.sh-st i{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none;box-shadow:0 0 0 3px color-mix(in oklab,var(--c) 22%,transparent)}
+.sh-clock{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.sh-clock b{font:300 2.6rem/1 var(--f-display);font-variant-numeric:tabular-nums;letter-spacing:-.03em;color:var(--ink)}
+.sh-clock small{font-size:.86rem;color:var(--muted)}
+.sh-hist{padding-top:14px;border-top:1px solid var(--line)}
+.sh-hist .dayhead{padding:10px 4px 4px;border-bottom:0;font-size:.8rem;color:var(--muted)}
+.sh-hist .dayhead:first-child{padding-top:0}
+.sh-hist .erow{padding:10px 4px}
+#shHist.one .e-m{display:none}

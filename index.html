@@ -70,15 +70,9 @@
       <div id="clockStrip" class="clockstrip" hidden><span>You are not clocked in</span><button type="button" class="btn btn-primary" id="clockInBtn">Clock in</button></div>
       <section class="hero" id="hero" aria-live="polite">
         <div class="hero-top"><span class="hero-k" id="heroKicker"></span></div>
-        <div class="hero-grid">
-          <div>
-            <div class="hero-state"><span class="hero-dot" aria-hidden="true"></span><span id="heroState"></span></div>
-            <p class="hero-cause" id="heroCause"></p>
-          </div>
-          <div class="hero-clock">
-            <span class="hero-timer" id="heroTimer">—</span>
-            <span class="hero-since" id="heroSince"></span>
-          </div>
+        <div>
+          <div class="hero-state"><span class="hero-dot" aria-hidden="true"></span><span id="heroState"></span></div>
+          <p class="hero-cause" id="heroCause"></p>
         </div>
         <div class="hero-act" id="heroAct"></div>
         <div class="hero-watch" id="heroWatch"></div>
@@ -98,13 +92,6 @@
         <div class="tl" id="shiftTl"></div>
       </section>
 
-      <section class="panel" aria-labelledby="slogTitle">
-        <div class="panel-head">
-          <div><h3 id="slogTitle">Recent</h3></div>
-          <button type="button" class="btn btn-sm btn-quiet" data-goto="history">See all</button>
-        </div>
-        <div class="hlist compact" id="shiftLog"></div>
-      </section>
     </div>
   </section>
 
@@ -244,6 +231,7 @@
         <input id="shAt" type="datetime-local" aria-label="Start time" hidden>
       </div>
       <p id="shErr" class="form-err" role="alert" hidden></p>
+      <div id="shHistWrap" class="sh-sec sh-hist" hidden><p class="lbl">History</p><div class="hlist compact" id="shHist"></div></div>
     </div>
     <div class="sh-foot"><button type="submit" class="btn btn-primary btn-lg btn-block" id="shSubmit" disabled>Log</button></div>
   </form>
