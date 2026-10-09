@@ -707,7 +707,7 @@ details.howto[open] summary{margin-bottom:12px}
 .w-dur small{font-weight:400;color:var(--muted);font-size:.78rem}
 .w-by{font-size:.84rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wtype{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font:600 .72rem/1 var(--f-body);background:var(--panel-2);color:var(--ink-2)}
-.wtype.t-breakdown{background:var(--down-soft);color:var(--down-ink)}
+.wtype.t-corrective{background:var(--down-soft);color:var(--down-ink)}
 .wtype.t-preventive{background:var(--run-soft);color:var(--run)}
 .wtype.t-improvement{background:color-mix(in oklab,var(--s1) 14%,transparent);color:var(--s1)}
 @media (max-width:720px){
@@ -738,18 +738,18 @@ input[type="datetime-local"],input[type="time"]{min-width:0;max-width:100%}
 .jcol{display:grid;gap:18px;align-content:start;min-width:0}
 .jtimes{gap:12px}
 #jbEndHint:empty{display:none}
-@media (min-width:860px){
+@media (min-width:760px){
   #job{width:min(58rem,calc(100vw - 48px));max-width:calc(100vw - 48px)}
   .job-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px 26px}
   .job-body > .form-err{grid-column:1/-1}
   .job-body textarea{min-height:96px}
 }
 .jtimes{grid-template-columns:minmax(0,1fr)}
-@media (min-width:560px) and (max-width:859px){.jtimes{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+@media (min-width:560px) and (max-width:759px){.jtimes{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .chips.crew .chip{height:34px;font-size:.84rem;padding:0 12px 0 10px}
 .chips.crew .chip i{background:var(--link)}
 .chips.crew .chip[aria-disabled="true"]{cursor:default}
-@media (min-width:860px){
+@media (min-width:760px){
   #job .sh-head{padding:18px 22px 6px}
   #job .sh-body{gap:14px 26px;padding-bottom:14px}
   #job .jcol{gap:14px}
@@ -759,3 +759,5 @@ input[type="datetime-local"],input[type="time"]{min-width:0;max-width:100%}
   #job .modes .mode{height:36px}
   #job .sh-foot{padding:10px 22px 16px}
 }
+#job textarea{min-height:58px}
+@media (min-width:760px){#job .job-body textarea{min-height:58px}}

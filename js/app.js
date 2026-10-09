@@ -2094,7 +2094,7 @@ function drawTable(doc, y, cols, rows, ctx) {
 /* ================= MAINTENANCE: job log for the maintenance team =================
    Any equipment or place, not only the line: final saw, crane, forklift, preventive work.
    One document per job in 'work'. Maintenance people and admins can read them; people edit their own, admins edit all. */
-const WTYPES = ['Breakdown', 'Preventive', 'Improvement', 'Other'];
+const WTYPES = ['Corrective', 'Preventive', 'Improvement', 'Other'];
 const WRANGES = [{ id: 'today', label: 'Today' }, { id: '7d', label: '7 days', days: 7 }, { id: '30d', label: '30 days', days: 30 }, { id: 'month', label: 'This month' }, { id: 'lastmonth', label: 'Last month' }, { id: '90d', label: '90 days', days: 90 }];
 function wBounds(id) {
   const now = Date.now(), d = new Date(now);
@@ -2109,8 +2109,8 @@ function normWork(id, d) {
   const str = (v, n) => typeof v === 'string' ? v.trim().slice(0, n) : '';
   const parts = Array.isArray(d.parts) ? d.parts.filter(p => p && (p.no || p.desc)).slice(0, 40).map(p => ({ no: str(p.no, 40), desc: str(p.desc, 80), qty: typeof p.qty === 'number' && p.qty > 0 ? p.qty : 1 })) : [];
   const helpers = Array.isArray(d.helpers) ? d.helpers.filter(x => x && typeof x.name === 'string' && x.name.trim()).slice(0, 8).map(x => ({ uid: str(x.uid, 128), name: str(x.name, 60) })) : [];
-  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, equipment: str(d.equipment, 60) || 'Not set', type: WTYPES.includes(d.type) ? d.type : 'Other',
-    problem: str(d.problem, 2000), solution: str(d.solution, 2000), parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
+  return { id, uid: str(d.uid, 128), personName: str(d.personName, 60), helpers, equipment: str(d.equipment, 60) || 'Not set', type: d.type === 'Breakdown' ? 'Corrective' : WTYPES.includes(d.type) ? d.type : 'Other',
+    problem: str(d.problem, 2000), diagnosis: str(d.diagnosis, 2000), solution: str(d.solution, 2000), notes: str(d.notes, 1000), parts, start: d.start, end: typeof d.end === 'number' ? d.end : null,
     createdAt: typeof d.createdAt === 'number' ? d.createdAt : d.start, updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : 0 };
 }
 function subWork(on) {
@@ -2143,7 +2143,7 @@ function renderMaint() {
   const kp = h('div', { class: 'kpis k4' },
     kpiEl('Jobs', String(list.length), '', open.length ? open.length + ' in progress' : b.phrase),
     kpiEl('Time on jobs', fmtH(hrs), 'h', 'finished jobs'),
-    kpiEl('Breakdowns', String(nType('Breakdown')), '', nType('Preventive') + ' preventive · ' + (nType('Improvement') + nType('Other')) + ' other'),
+    kpiEl('Corrective', String(nType('Corrective')), '', nType('Preventive') + ' preventive · ' + (nType('Improvement') + nType('Other')) + ' other'),
     kpiEl('Parts used', String(parts), '', list.filter(w => w.parts.length).length + ' jobs with parts'));
   const openCards = open.map(w => h('article', { class: 'card wcard k-open', onclick: ev => { if (!ev.target.closest('button')) openJob(w.id); } },
     h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, w.equipment), h('span', { class: 'rtag' }, w.type)), (() => { const p = h('span'); setPill(p, 'warn', 'In progress'); return p; })()),
@@ -2167,19 +2167,21 @@ function renderMaint() {
 
 /* ---------- job form ---------- */
 const job = $('#job');
-const JB = { id: null, type: 'Breakdown', parts: [], helpers: [], ro: false };
+const JB = { id: null, type: 'Corrective', parts: [], helpers: [], ro: false };
 function crewChoices(ownerUid) { return S.users.filter(u => u.status === 'active' && u.id !== ownerUid && (u.team === 'maintenance' || u.role === 'admin')).sort((a, c) => a.name.localeCompare(c.name)); }
 function jbErr(m) { const e = $('#jbErr'); e.textContent = m || ''; e.hidden = !m; }
 function equipChoices() { return uniqBy(machines().map(m => m.name).concat(S.config.equipment || [], S.work.map(w => w.equipment)), x => x.toLowerCase()).filter(Boolean); }
 function openJob(id, finishing) {
   const w = id ? S.work.find(x => x.id === id) : null;
   if (id && !w) return;
-  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), type: w ? w.type : 'Breakdown', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], ro: !!w && !canEditJob(w) });
+  Object.assign(JB, { id: w ? w.id : null, owner: w ? w.uid : myUid(), ownerName: w ? (w.personName || nameOf(w.uid)) : myName(), type: w ? w.type : 'Corrective', parts: w ? clone(w.parts) : [], helpers: w ? clone(w.helpers) : [], ro: !!w && !canEditJob(w) });
   $('#jbKicker').textContent = w ? jobNo(w) + ' · ' + (w.personName || nameOf(w.uid)) : 'New maintenance job · ' + myName();
   $('#jbTitle').textContent = w ? w.equipment : 'New job';
   $('#jb-eq').value = w ? w.equipment : '';
   $('#jb-problem').value = w ? w.problem : '';
   $('#jb-fix').value = w ? w.solution : '';
+  $('#jb-diag').value = w ? w.diagnosis : '';
+  $('#jb-notes').value = w ? w.notes : '';
   $('#jb-start').value = toLocalInput(w ? w.start : Date.now());
   $('#jb-end').value = w && w.end ? toLocalInput(w.end) : (finishing ? toLocalInput(Date.now()) : '');
   rc($('#jbEqList'), equipChoices().map(n => h('option', { value: n })));
@@ -2218,7 +2220,7 @@ function renderJob() {
 }
 function addPart() { JB.parts.push({ no: '', desc: '', qty: 1 }); renderJob(); const r = $$('#jbParts .prt'); const f = r.length && r[r.length - 1].querySelector('input'); if (f) f.focus(); }
 function jobFromForm() {
-  const eq = $('#jb-eq').value.trim(), problem = $('#jb-problem').value.trim(), solution = $('#jb-fix').value.trim();
+  const eq = $('#jb-eq').value.trim(), problem = $('#jb-problem').value.trim(), solution = $('#jb-fix').value.trim(), diagnosis = $('#jb-diag').value.trim(), notes = $('#jb-notes').value.trim();
   const start = fromLocalInput($('#jb-start').value), endV = $('#jb-end').value, end = endV ? fromLocalInput(endV) : null;
   if (!eq) throw 'Enter the equipment or place you worked on.';
   if (!problem) throw 'Describe the problem or the task.';
@@ -2229,7 +2231,7 @@ function jobFromForm() {
   if (end != null && end > Date.now() + 5 * MIN) throw 'The finish time is in the future.';
   if (end != null && !solution) throw 'Describe the work done or the fix before finishing the job.';
   const parts = JB.parts.map(p => ({ no: String(p.no || '').trim().slice(0, 40), desc: String(p.desc || '').trim().slice(0, 80), qty: Math.max(1, Math.round(+p.qty || 1)) })).filter(p => p.no || p.desc);
-  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), solution: solution.slice(0, 2000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), start, end };
+  return { equipment: eq.slice(0, 60), type: JB.type, problem: problem.slice(0, 2000), diagnosis: diagnosis.slice(0, 2000), solution: solution.slice(0, 2000), notes: notes.slice(0, 1000), parts, helpers: JB.helpers.slice(0, 8).map(x => ({ uid: x.uid || '', name: String(x.name || '').slice(0, 60) })), start, end };
 }
 function saveJob(e) {
   e.preventDefault(); jbErr('');
@@ -2288,7 +2290,7 @@ function drawWork(jsPDF, list, o) {
   const date = t => { const d = new Date(t); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
   const hms = ms => { const sec = Math.max(0, Math.round(ms / 1000)); return Math.floor(sec / 3600) + ':' + pad2(Math.floor(sec % 3600 / 60)) + ':' + pad2(sec % 60); };
   const head = S.config.report || {}, cname = head.name || '', csub = head.sub || '';
-  const kind = t => t === 'Breakdown' ? 'CORRECTIVE' : t.toUpperCase();
+  const kind = t => t.toUpperCase();
   list.forEach((w, idx) => {
     if (idx > 0) doc.addPage();
     const techs = techNames(w), status = w.end ? 'Finished' : 'In progress';
@@ -2327,16 +2329,21 @@ function drawWork(jsPDF, list, o) {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
     doc.splitTextToSize(clean(w.problem || ''), W - 2).forEach(l => { txt(l, L + 1, y, 10, 'bold'); y += 4.4; });
     // diagnosis (blank) and solution
-    txt('Diagnosis:', L + 1, y + 0.4, 9.5, 'normal', K.label); line(L, y + 3.6, R, y + 3.6); y += 8.6;
-    txt('Solution:', L + 1, y + 0.4, 9.5, 'normal', K.label);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
-    const sol = doc.splitTextToSize(clean(w.solution || ''), W - 20);
-    if (!sol.length) sol.push('');
-    sol.forEach((l, i) => { if (l) txt(l, L + 17, y + 0.4, 9.5, 'normal'); line(L, y + 2.4, R, y + 2.4); y += 6.6; });
+    const ruled = (label, body) => {
+      txt(label, L + 1, y + 0.4, 9.5, 'normal', K.label);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+      const ls = doc.splitTextToSize(clean(body || ''), W - 20);
+      if (!ls.length) ls.push('');
+      ls.forEach(l => { if (l) txt(l, L + 19, y + 0.4, 9.5, 'normal'); line(L, y + 2.4, R, y + 2.4); y += 6.6; });
+    };
+    y += 0.4;
+    ruled('Diagnosis:', w.diagnosis);
+    ruled('Solution:', w.solution);
     y += 3;
     // notes: parts used are written on the lines; the rest stay blank to write on
     tab('Notes', y); y += 5.6;
-    const notes = w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+    const notes = (w.notes ? doc.splitTextToSize(clean(w.notes), W - 2) : []).concat(w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty));
     const nLines = Math.max(3, notes.length);
     for (let i = 0; i < nLines; i++) { y += 8; if (notes[i]) txt(notes[i], L + 1, y - 1.4, 9.5, 'normal'); line(L, y, R, y); }
     y += 4;
@@ -2349,7 +2356,7 @@ function drawWork(jsPDF, list, o) {
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
     });
     y += 16;
-    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.end ? date(w.end) : ''], [L + 117, 34, 'Duration', w.end ? hms(wDur(w)) : ''], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && w.end ? hms(wDur(w)) : '']];
+    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.end ? date(w.end) : ''], [L + 117, 34, 'Duration', w.end ? hms(wDur(w)) : ''], [L + 159, 34, 'Breakdown Time', w.type === 'Corrective' && w.end ? hms(wDur(w)) : '']];
     c4.forEach(([x, wd, l, v]) => {
       if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
       line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
