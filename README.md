@@ -16,6 +16,7 @@ It runs in any browser and installs on phones and tablets as an app (PWA). Every
   - **ZPE A and ZPE B** form a group. One down does not stop the line. Both down together for 5 minutes stops the press. Use **ZPE both** to log both at once.
 - **Analysis:** availability, MTTR, average die change, a Pareto of downtime causes, downtime over time, issues and alarms per machine (including the ones the line ran through), and splits by machine mode and by shift.
 - **History:** every entry. Owners and admins can correct entries. Exports to CSV for Excel.
+- **Maintenance log (maintenance team and admins):** any job on any equipment or place, not only the line: final saw, crane, forklift, preventive work. Each job records the equipment, type (breakdown, preventive, improvement, other), problem or task, work done, parts used (part number, description, quantity) and start and finish times. Start a job now and finish it later, or enter it afterwards. **Download PDF** makes one report with a summary page and one page per job, with technician and supervisor sign-off lines. Each job also has its own one-page PDF.
 - **Shift report PDF:** the operator, date, clock-in and clock-out times, totals, a timeline, downtime by cause and a time-ordered log. Available any time during a shift and when clocking out.
 
 ## Sign-in and roles
@@ -23,6 +24,7 @@ It runs in any browser and installs on phones and tablets as an app (PWA). Every
 - People sign in with **Google** or with **email and password**.
 - A new account waits as **pending** until an admin approves it.
 - **Users** clock in, log entries and see all the analysis. They can correct their own entries.
+- Every user is on a **team**: **Operator** (the default) or **Maintenance**. Admins set it in **Admin > Users**. Maintenance users also get the **Maintenance** tab. They see the whole team's jobs and can edit their own.
 - **Admins** also approve or turn off users, edit machines, states, alarms and shifts, see all clock-ins, and download anyone's shift report.
 - The **main admin** is the email in `js/config.js` (`superAdminEmail`). Only that account can make or remove admins. It must sign in with a verified email. Google sign-in is always verified. Email/password accounts must open the verification link first.
 
@@ -83,10 +85,11 @@ Add `localhost` to the authorized domains in Firebase to sign in locally. Withou
 
 | Collection | Contents |
 | --- | --- |
-| `config/line` | Machines (name, role on the line, running state, downtime states with alarm lists, group and delay) and shifts |
-| `users/{uid}` | Name, email, role (`user` or `admin`), status (`pending`, `active` or `disabled`) |
+| `config/line` | Machines (name, role on the line, running state, downtime states with alarm lists, group and delay), shifts, and the maintenance equipment list |
+| `users/{uid}` | Name, email, role (`user` or `admin`), team (`operator` or `maintenance`), status (`pending`, `active` or `disabled`) |
 | `events/{id}` | One entry per state change: machine, state, alarm, mode, start time, notes, who logged it, and whether the press was stopped |
-| `sessions/{id}` | Clock-in and clock-out per person |
+| `sessions/{id}` | Clock-in and clock-out per person, and the start-of-shift line check |
+| `work/{id}` | Maintenance jobs: equipment, type, problem, work done, parts, start and finish, who did it |
 
 The line timeline is not stored. It is rebuilt from the entries, so correcting an entry's time or state updates every report.
 
@@ -102,3 +105,7 @@ sw.js, manifest.webmanifest, icons/   installable app and offline start-up
 firestore.rules          database security rules
 firestore.indexes.json   database indexes
 ```
+
+## Updating the database rules
+
+When `firestore.rules` changes in this repository, paste the whole file into **Firebase console > Firestore Database > Rules** again and press **Publish**. Until then the database keeps the old rules, and any feature that needs the new ones is refused.

@@ -17,6 +17,8 @@ service cloud.firestore {
     function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function isActive() { return isSuper() || (hasProfile() && profile().status == 'active'); }
     function isAdmin() { return isSuper() || (isActive() && profile().role == 'admin'); }
+    // Team: 'operator' (default) or 'maintenance'. Maintenance also keeps the maintenance job log.
+    function isMaint() { return isActive() && hasProfile() && profile().get('team', 'operator') == 'maintenance'; }
     function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
 
     // Machines, states, alarms and shifts.
@@ -34,6 +36,7 @@ service cloud.firestore {
         isSuper() || (
           request.resource.data.role == 'user'
           && request.resource.data.status == 'pending'
+          && request.resource.data.get('team', 'operator') == 'operator'
           && request.resource.data.email == request.auth.token.email.lower()
         )
       );
@@ -41,11 +44,12 @@ service cloud.firestore {
       allow update: if
         // People may change their own name or photo, nothing else.
         (signedIn() && request.auth.uid == uid && onlyChanges(['name', 'photo']))
-        // Admins approve, decline or turn off users. They cannot change roles or touch other admins.
+        // Admins approve, decline or turn off users and set their team. They cannot change roles or touch other admins.
         || (isAdmin()
             && resource.data.role != 'admin'
-            && onlyChanges(['status', 'approvedBy', 'approvedAt'])
-            && request.resource.data.status in ['active', 'pending', 'disabled'])
+            && onlyChanges(['status', 'approvedBy', 'approvedAt', 'team'])
+            && request.resource.data.status in ['active', 'pending', 'disabled']
+            && request.resource.data.get('team', 'operator') in ['operator', 'maintenance'])
         // Only the main admin changes roles.
         || isSuper();
 
@@ -63,6 +67,19 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isActive() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid);
       allow delete: if isAdmin() || (isActive() && resource.data.uid == request.auth.uid);
+    }
+
+    // Maintenance jobs: any equipment or place. Maintenance team and admins only.
+    match /work/{id} {
+      allow read: if isAdmin() || isMaint();
+      allow create: if (isAdmin() || isMaint())
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.equipment is string && request.resource.data.equipment.size() > 0
+        && request.resource.data.start is number;
+      allow update: if (isAdmin() || (isMaint() && resource.data.uid == request.auth.uid))
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.start is number;
+      allow delete: if isAdmin() || (isMaint() && resource.data.uid == request.auth.uid);
     }
 
     // Clock-in sessions.

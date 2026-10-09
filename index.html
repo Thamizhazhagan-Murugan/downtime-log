@@ -26,6 +26,7 @@
     <button class="tab" type="button" data-tab="shift" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</button>
     <button class="tab" type="button" data-tab="analysis" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M6 16v-4M11 16V6M16 16v-7"/></svg>Analysis</button>
     <button class="tab" type="button" data-tab="history" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>History</button>
+    <button class="tab" type="button" data-tab="maint" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.5 17.5a2.1 2.1 0 0 0 3 3l5.8-5.8a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.6-.4-.4-2.6z"/></svg>Maintenance</button>
     <button class="tab" type="button" data-tab="admin" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 15h6M9 8h6M17 16h6"/></svg>Admin</button>
   </nav>
 </aside>
@@ -141,6 +142,19 @@
     <div id="hList" class="panel hlist"></div>
   </section>
 
+  <!-- MAINTENANCE -->
+  <section class="panelset" data-panel="maint" hidden>
+    <div class="toolbar">
+      <div class="seg" id="wRange" role="group" aria-label="Period"></div>
+      <div class="tb-r">
+        <div class="seg" id="wWho" role="group" aria-label="Whose jobs"></div>
+        <button type="button" class="btn" id="wPdf">Download PDF</button>
+        <button type="button" class="btn btn-primary" id="wNew">+ New job</button>
+      </div>
+    </div>
+    <div class="panelset" id="wBody"></div>
+  </section>
+
   <!-- ADMIN -->
   <section class="panelset adm" data-panel="admin" hidden>
     <section class="panel" aria-labelledby="peopleTitle">
@@ -154,6 +168,11 @@
       </div>
       <div class="mlist" id="admMachines"></div>
       <div><button type="button" class="btn" data-act="addm" id="addMachine">+ Add machine</button></div>
+    </section>
+
+    <section class="panel" aria-labelledby="eqTitle">
+      <div class="panel-head"><div><h3 id="eqTitle">Maintenance equipment</h3><p class="panel-sub">Suggested in the maintenance job form, next to the line machines. People can still type anything else.</p></div></div>
+      <div id="admEquip"></div>
     </section>
 
     <section class="panel" aria-labelledby="shTitle2">
@@ -193,6 +212,7 @@
   <button class="bn" type="button" data-tab="shift" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Dashboard</button>
   <button class="bn" type="button" data-tab="analysis" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M6 16v-4M11 16V6M16 16v-7"/></svg>Analysis</button>
   <button class="bn" type="button" data-tab="history" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>History</button>
+  <button class="bn" type="button" data-tab="maint" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.5 17.5a2.1 2.1 0 0 0 3 3l5.8-5.8a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.6-.4-.4-2.6z"/></svg>Maint.</button>
   <button class="bn" type="button" data-tab="admin" aria-selected="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 15h6M9 8h6M17 16h6"/></svg>Admin</button>
 </nav>
 
@@ -245,6 +265,41 @@
     <div class="sh-foot">
       <p id="ckErr" class="form-err" role="alert" hidden></p>
       <div class="dlg-actions"><button type="button" class="btn btn-quiet" id="ckSkip">Skip</button><span class="sp"></span><button type="submit" class="btn btn-primary btn-lg" id="ckSubmit">Start shift</button></div>
+    </div>
+  </form>
+</dialog>
+
+<!-- MAINTENANCE JOB -->
+<dialog id="job" class="sheet" aria-labelledby="jbTitle">
+  <form id="jobForm" novalidate>
+    <div class="sh-head">
+      <div><p class="kicker" id="jbKicker">Maintenance job</p><h2 id="jbTitle">New job</h2></div>
+      <button type="button" class="x" id="jbClose" aria-label="Close">×</button>
+    </div>
+    <div class="sh-body">
+      <div class="sh-sec">
+        <label class="field" for="jb-eq"><span>Equipment or place</span><input id="jb-eq" type="text" list="jbEqList" maxlength="60" autocomplete="off" placeholder="Final saw, crane, forklift, press…"></label>
+        <datalist id="jbEqList"></datalist>
+        <div class="chips" id="jbEqChips"></div>
+      </div>
+      <div class="sh-sec"><p class="lbl">Type of work</p><div class="modes" id="jbType"></div></div>
+      <label class="field" for="jb-problem"><span>Problem or task</span><textarea id="jb-problem" rows="3" maxlength="2000" placeholder="What was wrong, or the preventive task"></textarea></label>
+      <label class="field" for="jb-fix"><span>Work done / solution</span><textarea id="jb-fix" rows="3" maxlength="2000" placeholder="What you did to fix it"></textarea></label>
+      <div class="sh-sec">
+        <div class="sh-row"><p class="lbl">Parts used</p><button type="button" class="linkbtn" id="jbAddPart">+ Add part</button></div>
+        <div class="prts" id="jbParts"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label for="jb-start">Start</label><div class="dt"><input id="jb-start" type="datetime-local"><button type="button" class="btn btn-sm" id="jbStartNow">Now</button></div></div>
+        <div class="field"><label for="jb-end">Finish</label><div class="dt"><input id="jb-end" type="datetime-local"><button type="button" class="btn btn-sm" id="jbEndNow">Now</button></div><small class="muted" id="jbEndHint"></small></div>
+      </div>
+      <p id="jbErr" class="form-err" role="alert" hidden></p>
+    </div>
+    <div class="sh-foot dlg-actions">
+      <button type="button" id="jbDelete" class="btn btn-danger">Delete</button>
+      <span class="sp"></span>
+      <button type="button" id="jbPdf" class="btn">PDF</button>
+      <button type="submit" id="jbSave" class="btn btn-primary">Start job</button>
     </div>
   </form>
 </dialog>
