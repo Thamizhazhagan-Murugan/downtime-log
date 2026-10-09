@@ -65,7 +65,8 @@ const DEFAULT_CONFIG = {
     { name: 'ZPE B', main: false, rule: 'group', group: 'ZPE', delay: 5, states: [runSt('Auto'), dnSt('Issue', ['Profile jam', 'Sensor fault'])] }
   ],
   shifts: [{ name: 'Day', start: '06:00' }, { name: 'Night', start: '18:00' }],
-  equipment: ['Final saw', 'Crane', 'Forklift']
+  equipment: ['Final saw', 'Crane', 'Forklift'],
+  report: { name: 'MAGNA', sub: 'ALUMINIUM PROFILÉ' }
 };
 function toMin(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim()); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; }
 const cleanAlarms = a => Array.isArray(a) ? uniqBy(a.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim().slice(0, 40)), x => x.toLowerCase()).filter(x => x.toLowerCase() !== 'other').slice(0, 60) : [];
@@ -98,6 +99,7 @@ function normalizeConfig(d) {
     const u = uniqBy(ms, m => m.name).slice(0, 10);
     if (u.length) c.machines = fixRules(u);
   }
+  if (d.report && typeof d.report === 'object') c.report = { name: typeof d.report.name === 'string' ? d.report.name.trim().slice(0, 30) : c.report.name, sub: typeof d.report.sub === 'string' ? d.report.sub.trim().slice(0, 40) : c.report.sub };
   if (Array.isArray(d.equipment)) c.equipment = uniqBy(d.equipment.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim().slice(0, 40)), x => x.toLowerCase()).slice(0, 80);
   if (Array.isArray(d.shifts)) { const s = d.shifts.filter(x => x && x.name && toMin(x.start) != null).map(x => ({ name: String(x.name).slice(0, 30), start: String(x.start).trim() })); if (s.length) c.shifts = s.slice(0, 6); }
   return c;
@@ -1332,7 +1334,8 @@ function draftFromConfig(c) {
       run: (m.states.find(s => s.run) || { name: 'Auto' }).name,
       down: m.states.filter(s => !s.run).map(s => ({ name: s.name, alarms: (s.alarms || []).slice(), add: '' })) })),
     shifts: c.shifts.map(s => ({ name: s.name, start: s.start })),
-    equipment: (c.equipment || []).slice(), eqAdd: ''
+    equipment: (c.equipment || []).slice(), eqAdd: '',
+    report: Object.assign({ name: '', sub: '' }, c.report || {})
   };
 }
 function configFromDraft(d) {
@@ -1370,7 +1373,7 @@ function configFromDraft(d) {
   if (!sh.length) throw 'Add at least one shift.';
   for (const s of sh) { if (!s.name) throw 'Every shift needs a name.'; if (toMin(s.start) == null) throw 'Shift ' + s.name + ' needs a start time.'; }
   if (uniq(sh.map(s => toMin(s.start))).length !== sh.length) throw 'Two shifts start at the same time.';
-  return { machines: out, shifts: sh.map(s => { const mn = toMin(s.start); return { name: s.name.slice(0, 30), start: pad(Math.floor(mn / 60)) + ':' + pad(mn % 60) }; }), equipment: uniqBy((d.equipment || []).map(x => String(x).trim().slice(0, 40)).filter(Boolean), x => x.toLowerCase()).slice(0, 80) };
+  return { machines: out, shifts: sh.map(s => { const mn = toMin(s.start); return { name: s.name.slice(0, 30), start: pad(Math.floor(mn / 60)) + ':' + pad(mn % 60) }; }), equipment: uniqBy((d.equipment || []).map(x => String(x).trim().slice(0, 40)).filter(Boolean), x => x.toLowerCase()).slice(0, 80), report: { name: String((d.report || {}).name || '').trim().slice(0, 30), sub: String((d.report || {}).sub || '').trim().slice(0, 40) } };
 }
 function renderAdmin() {
   const sig = JSON.stringify(S.config);
@@ -1384,6 +1387,9 @@ function renderSaveBar() { $('#saveBar').hidden = !S.draftDirty; }
 function redrawEditor() { S.edVer++; drawMachines(); drawShifts(); drawEquipment(); S.edDrawn = S.edVer; }
 function drawEquipment() {
   const d = S.draft;
+  rc($('#admReport'), h('div', { class: 'row2' },
+    h('label', { class: 'field' }, h('span', null, 'Company name'), h('input', { type: 'text', 'data-f': 'rname', value: d.report.name, maxlength: '30', placeholder: 'Company' })),
+    h('label', { class: 'field' }, h('span', null, 'Second line'), h('input', { type: 'text', 'data-f': 'rsub', value: d.report.sub, maxlength: '40', placeholder: 'Division or plant' }))));
   rc($('#admEquip'), h('div', { class: 'alist' },
     d.equipment.map((a, k) => h('span', { class: 'achip' }, a, h('button', { type: 'button', 'data-act': 'deleq', 'data-a': String(k), 'aria-label': 'Remove ' + a }, '×'))),
     h('span', { class: 'aadd' }, h('input', { type: 'text', 'data-f': 'eqadd', value: d.eqAdd || '', maxlength: '40', placeholder: 'Add equipment', 'aria-label': 'New equipment' }), h('button', { type: 'button', class: 'ibtn', 'data-act': 'addeq' }, 'Add'))));
@@ -2257,7 +2263,7 @@ async function workPdf(list, o, btn) {
     const doc = drawWork(jsPDF, list, o);
     const name = o.single ? 'maintenance-job-' + jobNo(list[0]).toLowerCase() + '-' + slug(list[0].equipment) + '.pdf' : 'maintenance-report-' + ymd(o.from) + (ymd(o.from) !== ymd(o.to) ? '-to-' + ymd(o.to) : '') + (o.who ? '-' + slug(o.who) : '') + '.pdf';
     saveFile(name, doc.output('blob'));
-    toast(o.single ? 'Job PDF downloaded' : 'Maintenance report downloaded · ' + plural(list.length, 'job'));
+    toast(o.single ? 'Work order downloaded' : 'Work orders downloaded · ' + plural(list.length, 'page'));
   } catch (x) {
     if (x && x.code === 'declined') return;
     toast(x && x.message === 'load' ? "Couldn't load the PDF tool. Check the connection and try again." : "Couldn't make the PDF. Try again.");
@@ -2268,118 +2274,87 @@ function reportWork(btn) {
   workPdf(list, { from: b.from, to: b.to, phrase: b.phrase, who: S.wwho === 'mine' ? myName() : '' }, btn);
 }
 function drawWork(jsPDF, list, o) {
-  /* Laid out like a paper work order: heading, a dark band with the type, two blocks of fields,
-     Comments (the problem), Solution, Parts used, Notes, then Work completed with type, technicians, status
-     and the signature / date / duration / breakdown time line. */
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const PW = 210, PH = 297, M = 14, W = PW - 2 * M;
-  const C = { ink: [20, 20, 20], ink2: [60, 60, 60], muted: [110, 110, 110], line: [150, 150, 150], hair: [210, 210, 210], bar: [58, 58, 58], bar2: [92, 92, 92], fill: [242, 242, 242], run: [24, 128, 56], warn: [150, 105, 0] };
-  const ctx = { M, W, PH, C: { ink: C.ink, ink2: C.ink2, muted: C.muted, line: C.hair, panel2: C.fill } };
+  /* One work order per page, laid out like the plant's paper work order (Letter size).
+     Left blank on purpose: the work order number (written in by hand), and fields this app does not track.
+     Added: Type, Technicians and Status above the signature line. Parts used go on the Notes lines. */
+  const doc = new jsPDF({ unit: 'mm', format: 'letter' });
+  const PW = 215.9, PH = 279.4, L = 10, R = PW - 10, W = R - L;
+  const K = { ink: [25, 25, 25], label: [35, 35, 35], logo: [62, 62, 62], logo2: [140, 140, 140], bar: [52, 52, 52], bar2: [88, 88, 88], line: [60, 60, 60], muted: [120, 120, 120] };
   const clean = v => String(v == null ? '' : v).replace(/[–—]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^\x09\x0a\x0d\x20-\x7e\xa0-\xff]/g, '?');
-  const txt = (t, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || C.ink)); doc.text(clean(t), x, y, opt || {}); };
-  const dt = t => { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear() + '  ' + hm(t); };
-  const day = t => { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear(); };
-  doc.setLineHeightFactor(1.3);
-  const header = (boxTitle, boxValue) => {
-    txt('MAINTENANCE', M, 26, 30, 'bold', [45, 45, 45]);
-    txt('EXTRUSION LINE  ·  WORK REPORT', M + 0.5, 34, 10, 'bold', [125, 125, 125]);
-    const bx = PW - M - 70;
-    doc.setFillColor(...C.bar); doc.rect(bx, 12, 70, 10, 'F');
-    txt(boxTitle, bx + 35, 19.2, 14, 'bold', [255, 255, 255], { align: 'center' });
-    doc.setDrawColor(...C.bar); doc.setLineWidth(0.6); doc.rect(bx, 22, 70, 12);
-    txt(boxValue, bx + 35, 30.2, 13, 'bold', C.ink, { align: 'center' });
-  };
-  const band = (right) => {
-    doc.setFillColor(...C.bar); doc.rect(M, 42, W, 10, 'F');
-    doc.setFillColor(...C.bar2); doc.rect(M + W * 0.52, 42, W * 0.48, 10, 'F');
-    if (right) txt(right, M + W * 0.76, 49.2, 14, 'bold', [255, 255, 255], { align: 'center' });
-  };
-  const tab = (title, y) => { doc.setFillColor(...C.bar); doc.rect(M, y, 62, 7.5, 'F'); txt(title, M + 31, y + 5.4, 11, 'bold', [255, 255, 255], { align: 'center' }); return y + 13; };
-  const rule = (y, x1, x2) => { doc.setDrawColor(...C.line); doc.setLineWidth(0.3); doc.line(x1 == null ? M : x1, y, x2 == null ? M + W : x2, y); };
-  const field = (label, value, x, y, vx, vAlign, bold) => { txt(label, x, y, 9.5, 'normal', C.ink2); if (value != null && value !== '') txt(value, vx, y, 9.5, bold ? 'bold' : 'normal', C.ink, vAlign ? { align: vAlign } : undefined); };
-  const multi = list.length > 1;
-  if (multi) {
-    header('Work Report', fmtDate(o.from) + ' - ' + fmtDate(o.to) + ' ' + new Date(o.to).getFullYear());
-    band((o.who ? o.who : 'All technicians').toUpperCase());
-    let y = 64;
-    const done = list.filter(w => w.end), hrs = done.reduce((t, w) => t + wDur(w), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
-    [['Period:', o.phrase ? o.phrase.replace(/^./, c => c.toUpperCase()) : ''], ['Jobs:', String(list.length)], ['Time on jobs:', fmtDur(hrs)]].forEach(([l, v], i) => field(l, v, M, y + i * 6.5, M + 34, null, true));
-    [['Breakdowns:', String(list.filter(w => w.type === 'Breakdown').length)], ['Preventive:', String(list.filter(w => w.type === 'Preventive').length)], ['Parts used:', String(parts)]].forEach(([l, v], i) => field(l, v, M + W * 0.56, y + i * 6.5, M + W, 'right', true));
-    doc.setDrawColor(...C.bar); doc.setLineWidth(0.6); doc.line(M + W * 0.54, 56, M + W * 0.54, y + 16);
-    y += 28;
-    y = tab('Jobs', y);
-    drawTable(doc, y, [{ h: 'Date', w: 30 }, { h: 'Equipment', w: 44 }, { h: 'Type', w: 24 }, { h: 'Technicians', w: 56 }, { h: 'Time', w: 28, align: 'right' }],
-      list.map(w => [{ t: dt(w.start) }, { t: clean(w.equipment), b: true }, { t: w.type }, { t: clean(techNames(w).join(', ')) }, { t: w.end ? fmtDur(wDur(w)) : 'in progress', mute: !w.end }]), ctx);
-  }
+  const txt = (t, x, y, size, style, color, opt) => { doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size); doc.setTextColor(...(color || K.ink)); doc.text(clean(t), x, y, opt || {}); };
+  const line = (x1, y1, x2, y2, w) => { doc.setDrawColor(...K.line); doc.setLineWidth(w || 0.3); doc.line(x1, y1, x2, y2); };
+  const tab = (title, y) => { doc.setFillColor(...K.bar); doc.rect(L, y, 66, 5.6, 'F'); txt(title, L + 33, y + 4.2, 10.5, 'bold', [255, 255, 255], { align: 'center' }); };
+  const pad2 = n => String(n).padStart(2, '0');
+  const date = t => { const d = new Date(t); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+  const hms = ms => { const sec = Math.max(0, Math.round(ms / 1000)); return Math.floor(sec / 3600) + ':' + pad2(Math.floor(sec % 3600 / 60)) + ':' + pad2(sec % 60); };
+  const head = S.config.report || {}, cname = head.name || '', csub = head.sub || '';
+  const kind = t => t === 'Breakdown' ? 'CORRECTIVE' : t.toUpperCase();
   list.forEach((w, idx) => {
-    if (multi || idx > 0) doc.addPage();
+    if (idx > 0) doc.addPage();
     const techs = techNames(w), status = w.end ? 'Finished' : 'In progress';
-    header('Work Report', day(w.start));
-    band(w.type === 'Breakdown' ? 'CORRECTIVE' : w.type.toUpperCase());
-    // two blocks of fields
-    let y = 63;
-    field('Equipment:', w.equipment, M, y, M + 30, null, true);
-    field('Department:', 'Maintenance', M, y + 6.5, M + 30);
-    field('Logged by:', w.personName || nameOf(w.uid), M, y + 13, M + 30);
-    field('Logged on:', dt(w.createdAt || w.start), M, y + 19.5, M + 30);
-    const rx = M + W * 0.56;
-    field('Start Date:', dt(w.start), rx, y, M + W, 'right');
-    field('Finish Date:', w.end ? dt(w.end) : '-', rx, y + 6.5, M + W, 'right');
-    field('Parts used:', w.parts.length ? String(w.parts.reduce((a, p) => a + p.qty, 0)) : 'None', rx, y + 13, M + W, 'right');
-    field('Status:', status, rx, y + 19.5, M + W, 'right');
-    doc.setDrawColor(...C.bar); doc.setLineWidth(0.6);
-    doc.line(M + W * 0.54, 56, M + W * 0.54, y + 24); doc.line(M + W * 0.54, y + 24, M + W * 0.75, y + 24);
-    y += 34;
-    // comments = the problem or task
-    y = tab('Comments', y);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
-    const probLines = doc.splitTextToSize(clean(w.problem || '-'), W);
-    probLines.forEach(l => { if (y > PH - 92) { doc.addPage(); y = 20; } txt(l, M, y, 10.5, 'bold'); y += 5.2; });
-    y += 3;
-    // solution on ruled lines
-    txt('Solution:', M, y, 9.5, 'normal', C.ink2);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-    const fixLines = doc.splitTextToSize(clean(w.solution || (w.end ? '' : 'Job still in progress.')), W - 20);
-    if (!fixLines.length) fixLines.push('');
-    fixLines.forEach((l, i) => { if (y > PH - 92) { doc.addPage(); y = 20; } if (l) txt(l, M + 19, y, 10, 'normal', w.solution ? C.ink : C.muted); rule(y + 1.6, i ? M : M + 18); y += 6.4; });
-    y += 4;
-    // parts used
-    y = tab('Parts used', y);
-    if (!w.parts.length) { txt('No parts used.', M, y - 1, 9.5, 'normal', C.muted); y += 4; }
-    else y = drawTable(doc, y - 4, [{ h: 'Part number', w: 50 }, { h: 'Description', w: W - 50 - 22 }, { h: 'Qty', w: 22, align: 'right' }], w.parts.map(p => [{ t: clean(p.no || '-'), b: true }, { t: clean(p.desc || '') }, { t: String(p.qty) }]), ctx) + 6;
-    // notes: ruled lines to write on
-    const notesH = 13 + 3 * 8, completeH = 66;
-    if (y + notesH + completeH > PH - 16) { doc.addPage(); y = 20; }
-    y = tab('Notes', y + 2);
-    for (let i = 0; i < 3; i++) { rule(y + 2); y += 8; }
-    // work completed
-    y = Math.max(y + 6, PH - 16 - completeH);
-    y = tab('Work completed', y);
-    const cols3 = [['Type', w.type], [techs.length > 1 ? 'Technicians' : 'Technician', techs.join(', ')], ['Status', status]];
-    const cw3 = [W * 0.22, W * 0.52, W * 0.2], gap = (W - cw3.reduce((a, b) => a + b, 0)) / 2;
-    let x = M;
-    cols3.forEach(([l, v], i) => {
-      const lines = doc.splitTextToSize(clean(v), cw3[i] - 2).slice(0, 2);
-      txt(lines[0], x, y + 3, 10.5, 'bold', l === 'Status' ? (w.end ? C.run : C.warn) : C.ink);
-      if (lines[1]) txt(lines[1], x, y + 8, 10.5, 'bold');
-      rule(y + (lines[1] ? 10 : 5.5), x, x + cw3[i]); txt(l, x, y + (lines[1] ? 14.5 : 10), 9, 'normal', C.ink2);
-      x += cw3[i] + gap;
+    // company heading
+    if (cname) txt(cname, L - 0.8, 25.5, 56, 'bold', K.logo);
+    if (csub) txt(csub.toUpperCase(), L, 33, 16.5, 'bold', K.logo2);
+    // work order box (number left blank)
+    doc.setFillColor(...K.bar); doc.rect(129, 13, R - 129 + 1, 8.6, 'F');
+    txt('Work Order', 129 + (R + 1 - 129) / 2, 19.3, 15, 'bold', [255, 255, 255], { align: 'center' });
+    doc.setDrawColor(...K.bar); doc.setLineWidth(0.5); doc.rect(129, 21.6, R - 129 + 1, 11);
+    doc.setLineWidth(1.4); doc.line(R + 1, 13, R + 1, 32.6); doc.line(129, 32.6, R + 1, 32.6);
+    // band with the type (equipment code removed)
+    doc.setFillColor(...K.bar); doc.rect(L, 38, W, 7.6, 'F');
+    doc.setFillColor(...K.bar2); doc.rect(L + 55, 38, 70, 7.6, 'F');
+    doc.setFillColor(...K.bar); doc.rect(L + 125, 38, W - 125, 7.6, 'F');
+    txt(kind(w.type), 156, 43.9, 14, 'bold', [255, 255, 255], { align: 'center' });
+    // left fields
+    const lf = [['Component - Tag:', w.equipment], ['Component Locat.:', ''], ['Division:', ''], ['Subdivision:', ''], ['Path:', ''], ['Location:', ''], ['Group:', '']];
+    lf.forEach(([l, v], i) => { const y = 62 + i * 4; txt(l, L + 1, y, 9.5, 'normal', K.label); if (v) txt(v, L + 33, y, 9.5, 'normal'); });
+    // right fields, with the frame on the left and bottom
+    const rx = 117, vx = R - 1, top = 50.5;
+    const rows = [['Code:', '000000 - Maintenance'], ['Worker(s):', techs, true], ['Sender:', ''], ['Receiver:', ''], ['Start Date:', date(w.start)], ['Requisition Date:', date(w.createdAt || w.start)], ['Priority:', ''], ['Late:', ''], ['Classification:', ''], ['Execution Mode:', ''], ['Dep./Res.:', 'Maintenance / Technicien Maintenance'], ['Estimated Time:', '']];
+    let y = top;
+    rows.forEach(([l, v, bold]) => {
+      txt(l, rx, y, 9.5, bold ? 'bold' : 'normal', K.label);
+      const vals = Array.isArray(v) ? v : [v];
+      vals.forEach((vv, k) => { if (vv) txt(vv, vx, y + k * 3.6, 9.5, 'normal', K.ink, { align: 'right' }); });
+      y += 4 + Math.max(0, vals.length - 1) * 3.6;
     });
-    y += 24;
-    const cw4 = (W - 3 * 8) / 4;
-    const sig = [['Signature', 'X'], ['Date', w.end ? day(w.end) : ''], ['Duration', w.end ? fmtDur(wDur(w)) : ''], ['Breakdown Time', w.type === 'Breakdown' && w.end ? fmtDur(wDur(w)) : (w.end ? '-' : '')]];
-    sig.forEach(([l, v], i) => {
-      const xx = M + i * (cw4 + 8);
-      if (v) txt(v, xx + (l === 'Signature' ? 0 : 1), y, l === 'Signature' ? 11 : 10.5, l === 'Signature' ? 'normal' : 'bold');
-      rule(y + 2, xx, xx + cw4); txt(l, xx, y + 6.5, 9, 'normal', C.ink2);
+    const frameEnd = y - 1.5;
+    line(114, 46.5, 114, frameEnd, 0.9); line(114, frameEnd, 136, frameEnd, 0.9);
+    // comments = the problem
+    y = Math.max(frameEnd + 1, 105);
+    tab('Comments', y);
+    y += 10;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.splitTextToSize(clean(w.problem || ''), W - 2).forEach(l => { txt(l, L + 1, y, 10, 'bold'); y += 4.4; });
+    // diagnosis (blank) and solution
+    txt('Diagnosis:', L + 1, y + 0.4, 9.5, 'normal', K.label); line(L, y + 3.6, R, y + 3.6); y += 8.6;
+    txt('Solution:', L + 1, y + 0.4, 9.5, 'normal', K.label);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+    const sol = doc.splitTextToSize(clean(w.solution || ''), W - 20);
+    if (!sol.length) sol.push('');
+    sol.forEach((l, i) => { if (l) txt(l, L + 17, y + 0.4, 9.5, 'normal'); line(L, y + 2.4, R, y + 2.4); y += 6.6; });
+    y += 3;
+    // notes: parts used are written on the lines; the rest stay blank to write on
+    tab('Notes', y); y += 5.6;
+    const notes = w.parts.map(p => 'Part ' + clean(p.no || '-') + (p.desc ? '  ' + clean(p.desc) : '') + '  x ' + p.qty);
+    const nLines = Math.max(3, notes.length);
+    for (let i = 0; i < nLines; i++) { y += 8; if (notes[i]) txt(notes[i], L + 1, y - 1.4, 9.5, 'normal'); line(L, y, R, y); }
+    y += 4;
+    // work completed: type, technicians and status, then signature / date / duration / breakdown time
+    tab('Work completed', y); y += 15;
+    const c3 = [[L + 9, 46, 'Type', w.type], [L + 63, 88, techs.length > 1 ? 'Technicians' : 'Technician', techs.join(', ')], [L + 159, 37, 'Status', status]];
+    c3.forEach(([x, wd, l, v]) => {
+      const vs = doc.splitTextToSize(clean(v), wd - 1).slice(0, 2);
+      vs.forEach((vv, k) => txt(vv, x, y - (vs.length - 1 - k) * 4, 10, 'bold'));
+      line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
+    });
+    y += 16;
+    const c4 = [[L + 9, 46, 'Signature', 'X'], [L + 63, 46, 'Date', w.end ? date(w.end) : ''], [L + 117, 34, 'Duration', w.end ? hms(wDur(w)) : ''], [L + 159, 34, 'Breakdown Time', w.type === 'Breakdown' && w.end ? hms(wDur(w)) : '']];
+    c4.forEach(([x, wd, l, v]) => {
+      if (v) txt(v, x, y - 1.6, v === 'X' ? 10.5 : 10, v === 'X' ? 'normal' : 'bold');
+      line(x, y + 1.4, x + wd, y + 1.4); txt(l, x, y + 5.6, 10, 'normal', K.label);
     });
   });
-  const n = doc.getNumberOfPages(), gen = 'Generated ' + fmtDate(Date.now()) + ' ' + new Date().getFullYear() + ' ' + hm(Date.now()) + ' by ' + myName() + ' · Extrusion Downtime Log';
-  for (let i = 1; i <= n; i++) {
-    doc.setPage(i);
-    txt(gen, M, PH - 7, 7, 'normal', C.muted);
-    txt('Page ' + i + ' of ' + n, M + W, PH - 7, 7, 'normal', C.muted, { align: 'right' });
-  }
   return doc;
 }
 
@@ -2472,6 +2447,7 @@ $('#addShift').addEventListener('click', e => adminAct('addsh', e.currentTarget)
 $('#saveBtn').addEventListener('click', saveConfig);
 const admE = $('#admEquip');
 admE.addEventListener('input', e => { if (e.target.dataset.f === 'eqadd') S.draft.eqAdd = e.target.value; });
+$('#admReport').addEventListener('input', e => { const f = e.target.dataset.f; if (f === 'rname') S.draft.report.name = e.target.value; else if (f === 'rsub') S.draft.report.sub = e.target.value; else return; markDirty(); });
 admE.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset.f === 'eqadd') { e.preventDefault(); equipAct('addeq', e.target); } });
 admE.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b) equipAct(b.dataset.act, b); });
 $('#discardBtn').addEventListener('click', () => { S.draftDirty = false; S.draftSig = ''; $('#saveErr').hidden = true; renderAll(); });
