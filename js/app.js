@@ -2115,13 +2115,13 @@ function normWork(id, d) {
 }
 function subWork(on) {
   if (!on || !S.db) { if (S.unsubWork) { S.unsubWork(); S.unsubWork = null; } return; }
-  if (S.unsubWork) return;
+  if (S.unsubWork || S.workDenied || (S.workRetryAt && Date.now() < S.workRetryAt)) return;
   const since = Date.now() - 100 * DAY;
   S.unsubWork = S.db.collection('work').where('start', '>=', since).orderBy('start', 'desc').limit(2000).onSnapshot(snap => {
-    S.work = snap.docs.map(d => normWork(d.id, d.data())).filter(Boolean); S.workLoaded = true;
+    S.work = snap.docs.map(d => normWork(d.id, d.data())).filter(Boolean); S.workLoaded = true; S.workDenied = false; S.workErr = '';
     if (S.tab === 'maint') renderMaint();
     if (job.open) renderJobSoft();
-  }, x => { S.workLoaded = true; S.workErr = fbMsg(x); if (S.tab === 'maint') renderMaint(); });
+  }, x => { S.workLoaded = true; S.workRetryAt = Date.now() + 60000; S.workDenied = !!x && x.code === 'permission-denied'; S.workErr = fbMsg(x); if (S.unsubWork) { S.unsubWork(); S.unsubWork = null; } if (S.tab === 'maint') renderMaint(); });
 }
 const jobNo = w => 'WO-' + ymd(w.start).replace(/-/g, '').slice(2) + '-' + w.id.slice(0, 4).toUpperCase();
 const wDur = w => (w.end || Date.now()) - w.start;
@@ -2137,6 +2137,23 @@ function renderMaint() {
   buildSeg('wWho', [{ id: 'all', label: 'Everyone' }, { id: 'mine', label: 'Mine' }], S.wwho, v => { S.wwho = v; LS.set('wwho', v); renderMaint(); });
   const b = wBounds(S.wrange), list = wList(), open = list.filter(w => w.end == null), done = list.filter(w => w.end != null);
   $('#wPdf').disabled = !done.length && !open.length;
+  $('#wNew').disabled = !!S.workDenied;
+  if (S.workDenied) {
+    const RULES_URL = 'https://github.com/Thamizhazhagan-Murugan/downtime-log/blob/main/firestore.rules';
+    rc($('#wBody'), h('div', { class: 'card rules-card' },
+      h('div', { class: 'card-h' }, h('div', { class: 'card-t' }, h('h3', null, 'The database is refusing the maintenance log')), (() => { const p = h('span'); setPill(p, 'down', 'Rules out of date'); return p; })()),
+      isSuper()
+        ? h('div', { class: 'rules-steps' },
+            h('p', null, 'The database rules in Firebase are older than this version of the app, so jobs can\'t be read or saved yet. Update them once:'),
+            h('ol', null,
+              h('li', null, 'Open ', h('a', { href: RULES_URL, target: '_blank', rel: 'noopener' }, 'firestore.rules on GitHub'), ' and press the Copy raw file button.'),
+              h('li', null, 'In the Firebase console, go to Firestore Database, then the Rules tab.'),
+              h('li', null, 'Select everything in the editor, paste, and press Publish.'),
+              h('li', null, 'Come back here and press Try again.')),
+            h('div', { class: 'form-actions' }, h('button', { type: 'button', class: 'btn btn-primary', onclick: () => { S.workDenied = false; S.workRetryAt = 0; S.workLoaded = false; S.workErr = ''; subWork(true); renderMaint(); } }, 'Try again')))
+        : h('p', null, 'The database rules need an update before maintenance jobs can be saved. Ask the main admin to publish the latest rules, then reload this page.')));
+    return;
+  }
   if (!S.workLoaded) { rc($('#wBody'), h('div', { class: 'empty' }, h('p', { class: 'empty-t' }, S.workErr ? "Couldn't load the maintenance log." : 'Loading the maintenance log…'), S.workErr ? h('p', { class: 'empty-s' }, S.workErr) : null)); return; }
   const hrs = done.reduce((t, w) => t + wDur(w), 0), parts = list.reduce((t, w) => t + w.parts.reduce((a, p) => a + p.qty, 0), 0);
   const nType = t => list.filter(w => w.type === t).length;
@@ -2239,14 +2256,18 @@ function saveJob(e) {
   let d; try { d = jobFromForm(); } catch (x) { return jbErr(String(x)); }
   const now = Date.now(), col = S.db.collection('work');
   if (JB.id) {
-    col.doc(JB.id).update(Object.assign(d, { updatedAt: now })).catch(x => toast(fbMsg(x)));
+    col.doc(JB.id).update(Object.assign(d, { updatedAt: now })).catch(jobWriteFailed);
     toast(d.end ? 'Job saved' : 'Job updated');
   } else {
     const ref = col.doc();
-    ref.set(Object.assign(d, { uid: myUid(), personName: myName(), createdAt: now, updatedAt: now })).catch(x => toast(fbMsg(x)));
+    ref.set(Object.assign(d, { uid: myUid(), personName: myName(), createdAt: now, updatedAt: now })).catch(jobWriteFailed);
     toast((d.end ? 'Job saved' : 'Job started') + (S.online ? '' : ' on this device. It syncs when you are back online.'));
   }
   closeJob();
+}
+function jobWriteFailed(x) {
+  if (x && x.code === 'permission-denied') { S.workDenied = true; renderAll(); toast(isSuper() ? "The job wasn't saved: the database rules need updating. See the Maintenance tab." : "The job wasn't saved: the database refused it. Ask the main admin to update the database rules."); }
+  else toast("The job wasn't saved. " + fbMsg(x));
 }
 function deleteJob() {
   const b = $('#jbDelete');
