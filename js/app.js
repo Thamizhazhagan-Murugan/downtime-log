@@ -2503,7 +2503,21 @@ window.addEventListener('online', () => { S.online = true; renderHeader(S.L); })
 window.addEventListener('offline', () => { S.online = false; renderHeader(S.L); });
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installPrompt = e; });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (S.wantWake && !S.wake) setWake(true); renderAll(); } });
-if ('serviceWorker' in navigator && location.protocol === 'https:') window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+/* App updates: check for a new version on start, when the app comes back to the screen, and every 20 minutes.
+   When one is ready, offer a reload instead of reloading by surprise in the middle of a form. */
+if ('serviceWorker' in navigator && location.protocol === 'https:') window.addEventListener('load', () => {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+    const offer = () => toast('A new version of the app is ready.', { label: 'Reload', fn: () => location.reload() });
+    reg.addEventListener('updatefound', () => {
+      const nw = reg.installing; if (!nw) return;
+      nw.addEventListener('statechange', () => { if (nw.state === 'activated' && hadController) offer(); });
+    });
+    const check = () => reg.update().catch(() => {});
+    setInterval(check, 20 * 60000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  }).catch(() => {});
+});
 
 /* tooltip: hover with a mouse, tap on a touch screen, or focus with the keyboard. First line is the heading. */
 const tip = $('#tip');
