@@ -2514,7 +2514,8 @@ function setJobStatus(w, st, btn) {
   toast(dn(w.equipment) + COLON + statLabel(st).toLowerCase());
 }
 function jobWriteFailed(x) {
-  if (x && x.code === 'permission-denied') { S.workDenied = true; renderAll(); toast(isSuper() ? "The job wasn't saved: the database rules need updating. See the Maintenance tab." : "The job wasn't saved: the database refused it. Ask the main admin to update the database rules."); }
+  // a refused change only fails that change: the rest of the maintenance log keeps working
+  if (x && x.code === 'permission-denied') toast(isSuper() ? "The change wasn't saved: the database rules in Firebase are older than the app. Publish firestore.rules again (Firestore Database > Rules)." : "The change wasn't saved: the database refused it. The main admin needs to publish the latest database rules in Firebase.");
   else toast(tx("The job wasn't saved. {0}", fbMsg(x)));
 }
 function deleteJob() {

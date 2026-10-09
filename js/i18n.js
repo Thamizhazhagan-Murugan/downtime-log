@@ -762,6 +762,8 @@
     'Duration': 'Durée',
     'Parts': 'Pièces',
     'with {0}': 'avec {0}',
+    'The change wasn\'t saved: the database rules in Firebase are older than the app. Publish firestore.rules again (Firestore Database > Rules).': 'Le changement n\'a pas été enregistré : les règles de la base de données dans Firebase sont plus vieilles que l\'application. Publiez firestore.rules de nouveau (Firestore Database > Rules).',
+    'The change wasn\'t saved: the database refused it. The main admin needs to publish the latest database rules in Firebase.': 'Le changement n\'a pas été enregistré : la base de données l\'a refusé. L\'admin principal doit publier les dernières règles de la base de données dans Firebase.',
     'Stopped working at': 'Arrêté de travailler à',
     'Leave empty if you are still working on it.': 'Laissez vide si vous travaillez encore dessus.',
     'The stop time must be after the start time.': 'L\'heure d\'arrêt doit être après l\'heure de début.',

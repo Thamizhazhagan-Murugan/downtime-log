@@ -1,6 +1,6 @@
 /* Service worker: keeps the app shell available offline. The data itself syncs through Firestore,
    which queues writes on the device while offline and sends them when the connection is back. */
-const VERSION = '26';  // keep the same as ?v= in index.html
+const VERSION = '27';  // keep the same as ?v= in index.html
 const CACHE = 'downtime-v' + VERSION;
 const SHELL = ['./', 'index.html', 'css/app.css?v=' + VERSION, 'js/i18n.js?v=' + VERSION, 'js/app.js?v=' + VERSION, 'js/config.js?v=' + VERSION, 'vendor/jspdf.umd.min.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('message', e => { if (e.data === 'skip-waiting') self.skipWaiting(); });
