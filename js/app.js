@@ -701,7 +701,7 @@ function clockIn() {
   ref.set(doc).catch(x => toast(fbMsg(x)));
   S.session = Object.assign({ id: ref.id }, doc);
   G.clockedOut = null;
-  renderAll(); toast('Clocked in as ' + myName() + '. Your shift starts now.');
+  renderAll(); openCheck();
 }
 function clockOut() {
   const s = S.session; if (!s) return;
@@ -859,22 +859,21 @@ function renderHero(L) {
   const kind = line.run === true ? 'run' : line.run === false ? 'down' : 'unk';
   const hero = $('#hero');
   hero.className = 'hero is-' + kind;
-  hero.style.setProperty('--hc', kind === 'run' ? 'var(--run)' : kind === 'down' ? causeColor(line.machine, line.state) : 'var(--axis)');
-  $('#heroKicker').textContent = kind === 'run' ? 'Line running · extrusion clock' : kind === 'down' ? 'Line down · downtime clock' : 'Clock not started';
-  $('#heroShift').textContent = L.shift.name + ' shift · ' + hm(L.shift.start) + '–' + hm(L.shift.end);
-  $('#heroState').textContent = kind === 'unk' ? 'Not logged yet' : line.group ? line.group.name + ' ' + line.state.toLowerCase() : line.state;
+  hero.style.setProperty('--hc', kind === 'run' ? 'var(--run)' : kind === 'down' ? 'var(--down)' : 'var(--axis)');
+  $('#heroKicker').textContent = kind === 'run' ? 'Line running' : kind === 'down' ? 'Line down' : 'Clock not started';
+  $('#heroState').textContent = kind === 'unk' ? 'Not logged yet' : line.group ? line.group.name + ' ' + line.state.toLowerCase() : (kind === 'down' && line.machine !== P) ? line.machine + ' ' + line.state.toLowerCase() : line.state;
   const cause = $('#heroCause');
   if (kind === 'unk') cause.textContent = 'Log what the ' + P.toLowerCase() + ' is doing to start the shift clock.';
   else if (line.group) rc(cause, h('b', null, andList(line.group.members)), ' all down for more than ' + line.group.delay + ' min');
-  else rc(cause, h('b', null, line.machine), ' · ' + (line.mode || 'mode not set'), line.ev && line.ev.stop ? ' · press stopped for this' : '', line.ev && evText(line.ev) ? ' · ' + evText(line.ev) : '');
+  else if (kind === 'run') cause.textContent = line.mode && line.mode !== 'Auto' ? line.mode : '';
+  else rc(cause, [line.ev && line.ev.alarm === OTHER ? line.ev.note : line.ev && line.ev.alarm, line.ev && line.ev.stop ? 'press stopped' : ''].filter(Boolean).join(' · '));
   const since = kind === 'unk' ? null : lineSince(L.R);
   const timer = $('#heroTimer');
   if (since == null) { timer.textContent = '—'; delete timer.dataset.since; }
   else { timer.dataset.since = String(since); timer.textContent = clock(now - since); }
   const sinceEl = $('#heroSince'); sinceEl.replaceChildren();
   if (since != null) {
-    sinceEl.append((kind === 'run' ? 'Running since ' : 'Down since ') + fmtWhen(since));
-    if (line.ev && !line.group && (line.ev.personName || line.ev.uid)) sinceEl.append(' · logged by ', whoEl(line.ev));
+    sinceEl.append('since ' + fmtWhen(since));
   }
   const btns = [];
   if (useExample()) btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(P) }, 'Start the real clock'));
@@ -885,7 +884,7 @@ function renderHero(L) {
       btns.push(backBtn(line.machine, 'btn btn-go btn-lg'));
       if (ruleOf(line.machine) === 'optional') btns.push(actBtn('Restart the press, issue still open', 'btn btn-lg', b => setPressStop(line.machine, false, b)));
     }
-    btns.push(h('button', { type: 'button', class: 'btn btn-lg', disabled: !canLog(), onclick: () => openSheet(null) }, 'Log something else'));
+    btns.push(h('button', { type: 'button', class: 'btn btn-lg', disabled: !canLog(), onclick: () => openSheet(null) }, 'Log other'));
   } else if (kind === 'run') btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(null) }, 'Log a stop'));
   else btns.push(h('button', { type: 'button', class: 'btn btn-primary btn-lg', disabled: !canLog(), onclick: () => openSheet(P) }, 'Start the clock'));
   rc($('#heroAct'), btns);
@@ -903,7 +902,7 @@ function renderWatch(L) {
     if (m.main) continue;
     const s = st[m.name]; if (!s || s.run) continue;
     if (m.rule === 'optional' && !s.stop) {
-      items.push(row({ title: m.name + ': ' + what(s), sub: 'Extrusion keeps running. Stop the press if the fix takes long.', since: s.downSince,
+      items.push(row({ title: m.name + ': ' + what(s), sub: 'Line still running', since: s.downSince,
         actions: [actBtn('Stop the press', 'btn btn-sm btn-stop', b => setPressStop(m.name, true, b)), backBtn(m.name, 'btn btn-sm btn-go')] }));
     } else if (m.rule === 'group') {
       const g = groupOf(m.name); if (!g || done.has(g.name)) continue;
@@ -912,11 +911,11 @@ function renderWatch(L) {
       if (allDown) {
         done.add(g.name);
         const trig = Math.max(...ss.map(x => x.downSince)) + g.delay * MIN;
-        items.push(row({ urgent: true, title: andList(g.members) + ' are ' + (g.members.length === 2 ? 'both' : 'all') + ' down', sub: 'The press stops at ' + hm(trig) + ' unless one of them is back first.', until: trig,
+        items.push(row({ urgent: true, title: andList(g.members) + ' are ' + (g.members.length === 2 ? 'both' : 'all') + ' down', sub: 'Press stops at ' + hm(trig), until: trig,
           actions: [bothBackBtn(g, 'btn btn-sm btn-go'), ...g.members.map(x => backBtn(x, 'btn btn-sm'))] }));
       } else {
         const others = g.members.filter(x => x !== m.name);
-        items.push(row({ title: m.name + ': ' + what(s), sub: 'Extrusion keeps running. The press stops only if ' + andList(others) + (others.length === 1 ? ' is' : ' are') + ' also down for ' + g.delay + ' min.', since: s.downSince,
+        items.push(row({ title: m.name + ': ' + what(s), sub: 'Line still running', since: s.downSince,
           actions: [backBtn(m.name, 'btn btn-sm btn-go')] }));
       }
     }
@@ -929,17 +928,12 @@ function renderTiles(L) {
     const e = L.R.state[m.name] || null; const run = e ? e.run : null;
     const causing = e && !run && (m.main || line.machine === m.name || (line.group && line.group.members.includes(m.name)));
     const cls = !e || run ? '' : causing ? ' down' : ' warn';
-    const color = run === true ? 'var(--run)' : !e ? 'var(--axis)' : causing ? causeColor(m.name, e.state) : 'var(--warn)';
-    const g = m.rule === 'group' ? groupOf(m.name) : null;
-    const tag = m.main ? 'Main' : g ? g.name + ' pair' : m.rule === 'optional' ? 'Optional stop' : null;
-    const flag = e && !run ? (causing ? (m.main ? (e.alarm || null) : 'Stopping the line' + (e.alarm ? ' · ' + e.alarm : '')) : 'Line still running' + (e.alarm ? ' · ' + e.alarm : '')) : null;
+    const color = run === true ? 'var(--run)' : !e ? 'var(--axis)' : causing ? 'var(--down)' : 'var(--warn)';
     const since = e ? (!run ? e.downSince : e.at) : null;
-    return h('button', { type: 'button', class: 'mtile' + cls, onclick: () => openSheet(m.name), 'aria-label': m.name + ': ' + (e ? e.state + ', ' + (e.mode || 'mode not set') : 'not logged') + '. Log a change.' },
-      h('span', { class: 'mt-top' }, h('span', { class: 'mt-name' }, m.name), tag ? h('span', { class: 'mt-tag' }, tag) : null),
-      h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), e ? e.state : 'Not logged'),
-      h('span', { class: 'mt-time', 'data-since': since != null ? String(since) : null }, e ? clock(L.now - since) : '—'),
-      flag ? h('span', { class: 'mt-flag' }, flag) : null,
-      h('span', { class: 'mt-meta' }, e ? (e.mode && e.mode !== e.state ? e.mode + ' · ' : (e.mode ? '' : 'Mode not set · ')) + 'since ' + fmtWhen(since) : 'Tap to log'));
+    return h('button', { type: 'button', class: 'mtile' + cls, onclick: () => openSheet(m.name), 'aria-label': m.name + ': ' + (e ? e.state + (e.alarm ? ', ' + e.alarm : '') : 'not logged') + '. Log a change.' },
+      h('span', { class: 'mt-name' }, m.name),
+      h('span', { class: 'mt-state', style: '--c:' + color }, h('i'), h('span', null, e ? (e.alarm && !run ? e.alarm : e.state) : 'Not logged')),
+      h('span', { class: 'mt-time', 'data-since': since != null ? String(since) : null }, e ? clock(L.now - since) : '—'));
   }));
 }
 function kpiEl(l, v, u, s, meter) {
@@ -952,28 +946,13 @@ const causeLabel = c => c.machine + ' · ' + c.state;
 function renderShiftPanel(L) {
   const { shift, st, now } = L;
   $('#shiftTitle').textContent = shift.name + ' shift';
-  $('#shiftSub').textContent = fmtDay(shift.start) + ' · ' + hm(shift.start) + '–' + hm(shift.end) + ' · ' + fmtDur(now - shift.start) + ' in, ' + fmtDur(Math.max(0, shift.end - now)) + ' to go';
-  $('#reportBtn').textContent = S.session ? 'My shift report PDF' : 'Shift report PDF';
+  $('#shiftSub').textContent = hm(shift.start) + '–' + hm(shift.end) + ' · ' + fmtDur(Math.max(0, shift.end - now)) + ' to go';
   const r = hmParts(st.run), d = hmParts(st.down);
   rc($('#shiftKpis'),
-    kpiEl('Extrusion', r[0], r[1], 'running time'),
-    kpiEl('Downtime', d[0], d[1], st.unk >= MIN ? fmtDur(st.unk) + ' not logged' : st.causes[0] ? 'most: ' + st.causes[0].state.toLowerCase() : 'none yet'),
-    kpiEl('Availability', st.avail == null ? '–' : (st.avail * 100).toFixed(1), st.avail == null ? '' : '%', 'of logged time', st.avail),
-    kpiEl('Stops', String(st.stops), '', st.causes.length ? plural(st.causes.length, 'cause') : 'none yet'));
+    kpiEl('Running', r[0], r[1]),
+    kpiEl('Down', d[0], d[1], st.causes[0] ? 'Most: ' + st.causes[0].state : null),
+    kpiEl('Availability', st.avail == null ? '–' : String(Math.round(st.avail * 100)), st.avail == null ? '' : '%', null, st.avail));
   renderTimeline($('#shiftTl'), L.RS.segs, shift.start, shift.end, now);
-  rc($('#shiftLegend'), h('span', { class: 'lg' }, h('i', { class: 'sw', style: 'background:var(--run)' }), runStateOf(primary())),
-    st.causes.map(c => h('span', { class: 'lg' }, h('i', { class: 'sw', style: 'background:' + causeColor(c.machine, c.state) }), causeLabel(c))),
-    st.unk >= MIN ? h('span', { class: 'lg' }, h('i', { class: 'sw unk' }), 'Not logged') : null);
-  const box = $('#shiftCauses');
-  if (!st.causes.length) { rc(box, h('p', { class: 'muted' }, 'No downtime this shift so far.')); return; }
-  const max = st.causes[0].ms || 1;
-  rc(box, h('div', { class: 'clist-h' }, 'Downtime by cause'), st.causes.map(c => {
-    const col = causeColor(c.machine, c.state);
-    return h('div', { class: 'crow', 'data-tip': causeLabel(c) + '\n' + plural(c.n, 'stop') + ' · ' + fmtDur(c.ms) + (st.down ? ' · ' + Math.round(c.ms / st.down * 100) + '% of downtime' : '') },
-      h('i', { class: 'sw', style: 'background:' + col }), h('span', { class: 'c-name' }, c.state, h('small', null, c.machine)),
-      h('span', { class: 'c-n' }, c.n + '×'), h('span', { class: 'c-bar' }, h('i', { style: 'width:' + (c.ms / max * 100).toFixed(2) + '%;background:' + col })),
-      h('span', { class: 'c-v' }, fmtDur(c.ms)));
-  }));
 }
 function segTip(s) {
   const head = s.run === true ? 'Running' : s.run == null ? 'Not logged' : 'Downtime';
@@ -1009,8 +988,8 @@ function renderShiftLog(L) {
   const next = nextMap(L.D.events.concat(Object.values(L.D.seeds || {})));
   const list = L.D.events.filter(e => e.at >= L.shift.start && e.at <= L.now).sort((a, b) => byAt(b, a));
   const box = $('#shiftLog');
-  if (!list.length) { rc(box, h('p', { class: 'muted' }, 'Nothing logged this shift yet. The state carried over from the last shift is shown above.')); return; }
-  rc(box, list.slice(0, 80).map(e => entryRow(e, (next[e.id] || L.now) - e.at, !next[e.id])));
+  if (!list.length) { rc(box, h('p', { class: 'muted' }, 'Nothing logged this shift yet.')); return; }
+  rc(box, list.slice(0, 5).map(e => entryRow(e, (next[e.id] || L.now) - e.at, !next[e.id])));
   fillNames(box);
 }
 
@@ -1629,6 +1608,65 @@ async function submitSheet(e) {
   if (r.ok) closeSheet(); else shErr(r.msg);
 }
 
+/* ---------- start-of-shift line check: the state of every machine, once, at clock-in ---------- */
+const check = $('#check');
+const CK = { rows: {} };
+function ckErr(m) { const e = $('#ckErr'); e.textContent = m || ''; e.hidden = !m; }
+function openCheck() {
+  if (!canLog()) return;
+  CK.rows = {};
+  for (const m of machines()) {
+    const cur = realCurrent(m.name), st = cur && m.states.some(x => x.name === cur.state) ? cur.state : runStateOf(m.name);
+    const run = isRunState(m.name, st);
+    const alarms = run ? [] : alarmsFor(m.name, st);
+    const alarm = !run && cur && cur.state === st && (alarms.includes(cur.alarm) || cur.alarm === OTHER) ? cur.alarm : '';
+    CK.rows[m.name] = { state: st, mode: (cur && cur.mode) || 'Auto', alarm, note: !run && cur && cur.state === st ? (cur.note || '') : '', stop: !!(cur && cur.stop && !run) };
+  }
+  ckErr(''); renderCheck();
+  if (typeof check.showModal === 'function') { if (!check.open) check.showModal(); } else check.setAttribute('open', '');
+}
+function closeCheck() { if (typeof check.close === 'function') check.close(); else check.removeAttribute('open'); }
+function ckRow(m) {
+  const r = CK.rows[m.name], run = isRunState(m.name, r.state), alarms = run ? [] : alarmsFor(m.name, r.state);
+  const color = s => s.run ? 'var(--run)' : 'var(--down)';
+  const set = patch => { Object.assign(r, patch); ckErr(''); const el = $('#ck-' + CSS.escape(m.name.replace(/\s+/g, '_'))); if (el) el.replaceWith(ckRow(m)); };
+  return h('div', { class: 'ck-row' + (run ? '' : ' is-down'), id: 'ck-' + m.name.replace(/\s+/g, '_') },
+    h('div', { class: 'ck-head' },
+      h('span', { class: 'ck-name' }, m.name),
+      h('select', { class: 'ck-mode', 'aria-label': m.name + ' mode', onchange: e => { r.mode = e.target.value; } }, MODES.map(md => { const o = h('option', { value: md }, md); if (md === r.mode) o.selected = true; return o; }))),
+    h('div', { class: 'chips', role: 'group', 'aria-label': m.name + ' state' }, m.states.map(s => h('button', { type: 'button', class: 'chip', style: '--c:' + color(s), 'aria-pressed': String(r.state === s.name),
+      onclick: () => set({ state: s.name, alarm: '', note: '', stop: false, mode: s.run ? 'Auto' : r.mode }) }, h('i'), s.name))),
+    !run && alarms.length ? h('select', { class: 'ck-alarm', 'aria-label': m.name + ' alarm', onchange: e => set({ alarm: e.target.value }) },
+      [h('option', { value: '' }, 'Which alarm?')].concat(alarms.concat([OTHER]).map(a => { const o = h('option', { value: a }, a); if (a === r.alarm) o.selected = true; return o; }))) : null,
+    !run && (r.alarm === OTHER || !alarms.length) ? h('input', { type: 'text', class: 'ck-note', maxlength: '120', placeholder: r.alarm === OTHER ? 'Describe the problem' : 'Notes (optional)', value: r.note, oninput: e => { r.note = e.target.value; } }) : null,
+    !run && m.rule === 'optional' ? h('label', { class: 'ck-stop' }, h('input', { type: 'checkbox', checked: r.stop, onchange: e => { r.stop = e.target.checked; } }), 'Press stopped for this') : null);
+}
+function renderCheck() {
+  rc($('#ckBody'), machines().map(ckRow));
+}
+async function submitCheck(e) {
+  e.preventDefault(); ckErr('');
+  if (!canLog()) return ckErr('Not connected to the database.');
+  const now = Date.now(), items = [], snap = [];
+  for (const m of machines()) {
+    const r = CK.rows[m.name]; if (!r) continue;
+    const run = isRunState(m.name, r.state), alarms = run ? [] : alarmsFor(m.name, r.state);
+    const note = run ? '' : r.note.trim();
+    if (alarms.length && !r.alarm) return ckErr('Pick the alarm for the ' + m.name.toLowerCase() + '.');
+    if (r.alarm === OTHER && !note) return ckErr('Describe the problem on the ' + m.name.toLowerCase() + '.');
+    const alarm = run ? '' : r.alarm;
+    const stop = !run && m.rule === 'optional' && r.stop;
+    snap.push({ machine: m.name, state: r.state, mode: r.mode, alarm });
+    const cur = realCurrent(m.name);
+    if (cur && cur.state === r.state && (cur.mode || 'Auto') === r.mode && (cur.alarm || '') === alarm && !!cur.stop === stop && (cur.note || '') === note) continue;
+    items.push({ machine: m.name, state: r.state, mode: r.mode, at: now, alarm, note, stop });
+  }
+  if (S.session) S.db.collection('sessions').doc(S.session.id).update({ check: snap, checkedAt: now }).catch(() => {});
+  closeCheck();
+  if (items.length) writeEvents(items, 'Line check saved');
+  else toast('Line check saved');
+}
+
 /* ---------- edit entry ---------- */
 const edit = $('#edit');
 let editId = null;
@@ -1889,6 +1927,9 @@ $('#exToggle').addEventListener('click', () => {
   renderAll();
 });
 $('#shForm').addEventListener('submit', submitSheet);
+$('#ckForm').addEventListener('submit', submitCheck);
+$('#ckSkip').addEventListener('click', closeCheck);
+$('#ckClose').addEventListener('click', closeCheck);
 $('#shClose').addEventListener('click', closeSheet);
 $('#shChange').addEventListener('click', () => { SH.machine = null; SH.group = null; SH.state = null; SH.alarm = null; renderSheet(); });
 $('#shGroupLink').addEventListener('click', () => { const g = SH.machine ? groupOf(SH.machine) : null; if (!g) return; SH.group = g; SH.machine = null; SH.state = null; SH.alarm = null; SH.modeTouched = false; renderSheet(); });
